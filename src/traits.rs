@@ -4,7 +4,7 @@ use {ProcedureId, Result};
 
 pub trait Cast {
     const PROCEDURE: ProcedureId;
-    type Notification: IncrementalSerialize + IncrementalDeserialize;
+    type Notification: IncrementalSerialize + IncrementalDeserialize + Send + 'static;
 }
 
 pub trait IncrementalSerialize {
