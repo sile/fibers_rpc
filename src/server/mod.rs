@@ -245,7 +245,7 @@ impl Future for TcpStreamHandler {
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         while let Async::Ready(_todo) = track!(self.channel.poll())? {
-            // TODO
+            // TODO: spawn future
         }
         Ok(Async::NotReady)
     }
