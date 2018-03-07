@@ -58,11 +58,12 @@ impl Future for RpcChannel {
         }
 
         while track!(self.connection.poll())?.is_ready() {
-            if self.frame.is_empty() {
+            while self.frame.has_space() {
                 if let Some(mut message) = self.sending_messages.pop_front() {
                     match track!(message.fill_frame(&mut self.frame)) {
                         Err(e) => {
                             debug!(self.connection.logger, "Cannot fill frame: {}", e);
+                            message.fill_error_frame(&mut self.frame);
                         }
                         Ok(false) => {
                             self.sending_messages.push_back(message);
@@ -102,19 +103,29 @@ impl SendingMessage {
         SendingMessage { seqno, message }
     }
     fn fill_frame(&mut self, frame: &mut Frame) -> Result<bool> {
-        let buf = &mut frame.buffer[..];
+        let buf = &mut frame.buffer[frame.start..];
 
         BigEndian::write_u32(&mut buf[0..], self.seqno);
 
-        let size = track!(self.message.incremental_serialize(&mut buf[6..]))?;
-        BigEndian::write_u16(&mut buf[2..], size as u16);
+        let size = track!(self.message.incremental_serialize(&mut buf[7..]))?;
+        BigEndian::write_u16(&mut buf[5..], size as u16);
 
-        frame.start = 0;
-        frame.end = 6 + size;
+        frame.end += Frame::HEADER_SIZE + size;
         let is_completed = size < Frame::MAX_DATA_SIZE;
         Ok(is_completed)
     }
+    fn fill_error_frame(&self, frame: &mut Frame) {
+        let buf = &mut frame.buffer[frame.start..];
+
+        BigEndian::write_u32(&mut buf[0..], self.seqno);
+        buf[4] = FLAG_ERROR;
+        BigEndian::write_u16(&mut buf[5..], 0);
+
+        frame.end += Frame::HEADER_SIZE;
+    }
 }
+
+const FLAG_ERROR: u8 = 0b0000_0001;
 
 #[derive(Debug)]
 struct Connection {
@@ -133,6 +144,9 @@ impl Connection {
     }
 
     fn send_frame(&mut self, frame: &mut Frame) -> bool {
+        if frame.is_empty() {
+            return false;
+        }
         let next = if let ConnectionState::Connected(ref mut stream) = self.state {
             match stream.write(frame.as_bytes()) {
                 Err(e) => {
@@ -146,6 +160,10 @@ impl Connection {
                 }
                 Ok(size) => {
                     frame.start += size;
+                    if frame.start == frame.end {
+                        frame.start = 0;
+                        frame.end = 0;
+                    }
                     None
                 }
             }
@@ -208,7 +226,9 @@ enum ConnectionState {
     Connected(TcpStream),
 }
 
-// | msg_seqno:32 | frame_len:16 | frame_data:* |
+// | msg_seqno:32 | flags:8 | frame_len:16 | frame_data:* |
+//
+// s/Frame/FrameBuffer/
 #[derive(Debug)]
 struct Frame {
     buffer: Vec<u8>,
@@ -216,18 +236,22 @@ struct Frame {
     end: usize,
 }
 impl Frame {
-    const MAX_SIZE: usize = 4 + 2 + Self::MAX_DATA_SIZE;
+    const HEADER_SIZE: usize = 4 + 1 + 2;
+    const MAX_SIZE: usize = Self::HEADER_SIZE + Self::MAX_DATA_SIZE;
     const MAX_DATA_SIZE: usize = 0xFFFF;
 
     fn new() -> Self {
         Frame {
-            buffer: vec![0; Self::MAX_SIZE],
+            buffer: vec![0; Self::MAX_SIZE * 2],
             start: 0,
             end: 0,
         }
     }
     fn is_empty(&self) -> bool {
         self.start == self.end
+    }
+    fn has_space(&self) -> bool {
+        self.end <= Self::MAX_SIZE
     }
     fn as_bytes(&self) -> &[u8] {
         &self.buffer[self.start..self.end]
