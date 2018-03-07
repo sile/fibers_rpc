@@ -12,6 +12,7 @@ use clap::{App, Arg, SubCommand};
 use fibers::{Executor, InPlaceExecutor, Spawn};
 use fibers_rpc::ProcedureId;
 use fibers_rpc::client::RpcClientServiceBuilder;
+use fibers_rpc::server::RpcServerBuilder;
 use fibers_rpc::traits::Cast;
 use futures::Future;
 use sloggers::Build;
@@ -58,9 +59,15 @@ fn main() {
     let log_level: Severity = track_try_unwrap!(matches.value_of("LOG_LEVEL").unwrap().parse());
     let logger = track_try_unwrap!(TerminalLoggerBuilder::new().level(log_level).build());
 
-    let executor = track_try_unwrap!(InPlaceExecutor::new().map_err(Failure::from_error));
+    let mut executor = track_try_unwrap!(InPlaceExecutor::new().map_err(Failure::from_error));
 
     if let Some(_matches) = matches.subcommand_matches("server") {
+        let server = RpcServerBuilder::new(addr)
+            .logger(logger)
+            .finish(executor.handle());
+        let fiber = executor.spawn_monitor(server);
+        let _ = track_try_unwrap!(executor.run_fiber(fiber).map_err(Failure::from_error))
+            .map_err(|e| panic!("{}", e));
     } else if let Some(_matches) = matches.subcommand_matches("client") {
         let service = RpcClientServiceBuilder::new()
             .logger(logger)

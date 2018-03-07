@@ -27,6 +27,21 @@ pub struct RpcChannel {
     frame: Frame,
 }
 impl RpcChannel {
+    pub fn with_stream(logger: Logger, stream: TcpStream) -> (Self, RpcChannelHandle) {
+        let (outgoing_message_tx, outgoing_message_rx) = mpsc::channel();
+        let channel = RpcChannel {
+            connection: Connection::with_stream(logger, stream),
+            outgoing_message_rx,
+            sending_messages: VecDeque::new(),
+            next_message_seqno: 0,
+            frame: Frame::new(),
+        };
+        let handle = RpcChannelHandle {
+            outgoing_message_tx,
+        };
+        (channel, handle)
+    }
+
     pub fn new(logger: Logger, peer: SocketAddr) -> (Self, RpcChannelHandle) {
         let (outgoing_message_tx, outgoing_message_rx) = mpsc::channel();
         let channel = RpcChannel {
@@ -127,18 +142,30 @@ impl SendingMessage {
 
 const FLAG_ERROR: u8 = 0b0000_0001;
 
+// TODO: リトライは上のエイヤーで行う
 #[derive(Debug)]
 struct Connection {
     logger: Logger,
-    peer: SocketAddr,
+    peer: Option<SocketAddr>,
     state: ConnectionState,
 }
 impl Connection {
+    fn with_stream(logger: Logger, stream: TcpStream) -> Self {
+        unsafe {
+            let _ = stream.with_inner(|s| s.set_nodelay(false));
+        }
+        let state = ConnectionState::Connected(stream);
+        Connection {
+            logger,
+            peer: None,
+            state,
+        }
+    }
     fn new(logger: Logger, peer: SocketAddr) -> Self {
         let state = ConnectionState::Wait(timer::timeout(Duration::default()));
         Connection {
             logger,
-            peer,
+            peer: Some(peer),
             state,
         }
     }
@@ -184,8 +211,12 @@ impl Future for Connection {
             let next = match self.state {
                 ConnectionState::Wait(ref mut f) => {
                     if track!(f.poll().map_err(|e| ErrorKind::Other.cause(e)))?.is_ready() {
-                        debug!(self.logger, "Starts TCP connecting");
-                        ConnectionState::Connecting(TcpStream::connect(self.peer))
+                        if let Some(peer) = self.peer {
+                            debug!(self.logger, "Starts TCP connecting");
+                            ConnectionState::Connecting(TcpStream::connect(peer))
+                        } else {
+                            track_panic!(ErrorKind::Other, "TODO");
+                        }
                     } else {
                         break;
                     }

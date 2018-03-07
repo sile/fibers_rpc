@@ -1,6 +1,21 @@
 use std::io::{Cursor, Read, Write};
+use futures::{Future, Poll};
 
 use {Error, ProcedureId, Result};
+
+pub trait HandleCast<T: Cast> {
+    fn handle_cast(self, notification: T::Notification) -> NoReply;
+}
+
+#[derive(Debug)]
+pub struct NoReply;
+impl Future for NoReply {
+    type Item = ();
+    type Error = ();
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        unimplemented!()
+    }
+}
 
 pub trait Cast {
     const PROCEDURE: ProcedureId;
