@@ -4,10 +4,12 @@ use futures::{Future, Poll};
 
 use {Error, ProcedureId, Result};
 
-pub trait HandleCast<T: Cast> {
+pub trait HandleCast<T: Cast>: Clone + Send + 'static {
+    fn init(&self) -> T::Notification;
     fn handle_cast(self, notification: T::Notification) -> NoReply;
 }
 
+// TODO: add no future version
 #[derive(Debug)]
 pub struct NoReply;
 impl Future for NoReply {

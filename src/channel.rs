@@ -373,7 +373,17 @@ impl Frame {
                 None
             } else {
                 assert_eq!(self.as_bytes().len() - Frame::HEADER_SIZE, len); // TODO
-                Some((seqno, Ok(&self.as_bytes()[Frame::HEADER_SIZE..][..len])))
+                let start = self.start + Frame::HEADER_SIZE;
+                let end = start + len;
+                self.start = end;
+                if self.start == self.end {
+                    self.start = 0;
+                    self.end = 0;
+                }
+                if self.end > Self::MAX_SIZE {
+                    unimplemented!()
+                }
+                Some((seqno, Ok(&self.buffer[start..end])))
             }
         }
     }

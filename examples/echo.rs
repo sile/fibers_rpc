@@ -13,7 +13,7 @@ use fibers::{Executor, InPlaceExecutor, Spawn};
 use fibers_rpc::ProcedureId;
 use fibers_rpc::client::RpcClientServiceBuilder;
 use fibers_rpc::server::RpcServerBuilder;
-use fibers_rpc::traits::Cast;
+use fibers_rpc::traits::{Cast, HandleCast};
 use futures::Future;
 use sloggers::Build;
 use sloggers::terminal::TerminalLoggerBuilder;
@@ -24,6 +24,21 @@ struct EchoRpc;
 impl Cast for EchoRpc {
     const PROCEDURE: ProcedureId = 0;
     type Notification = Cursor<Vec<u8>>;
+}
+
+#[derive(Clone)]
+struct EchoHandler;
+impl HandleCast<EchoRpc> for EchoHandler {
+    fn init(&self) -> <EchoRpc as Cast>::Notification {
+        Cursor::new(Vec::new())
+    }
+    fn handle_cast(
+        self,
+        notification: <EchoRpc as Cast>::Notification,
+    ) -> fibers_rpc::traits::NoReply {
+        println!("# RECV: {:?}", notification);
+        fibers_rpc::traits::NoReply
+    }
 }
 
 fn main() {
@@ -64,6 +79,7 @@ fn main() {
     if let Some(_matches) = matches.subcommand_matches("server") {
         let server = RpcServerBuilder::new(addr)
             .logger(logger)
+            .register_cast_handler(EchoHandler)
             .finish(executor.handle());
         let fiber = executor.spawn_monitor(server);
         let _ = track_try_unwrap!(executor.run_fiber(fiber).map_err(Failure::from_error))
