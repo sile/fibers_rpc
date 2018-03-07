@@ -14,7 +14,7 @@ pub struct RpcClient {
 }
 impl RpcClient {
     pub fn cast<T: Cast>(&self, server: SocketAddr, notification: T::Notification) {
-        let message = OutgoingMessage::new(Message::Notification {
+        let message = OutgoingMessage::new(Message {
             procedure: T::PROCEDURE,
             data: notification,
         });

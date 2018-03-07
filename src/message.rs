@@ -2,21 +2,25 @@ use std::fmt;
 use byteorder::{BigEndian, WriteBytesExt};
 
 use {Error, ProcedureId, Result};
-use traits::IncrementalSerialize;
+use traits::{IncrementalDeserialize, IncrementalSerialize};
 
 #[derive(Debug)]
-pub enum Message<T> {
-    Notification { procedure: ProcedureId, data: T },
+pub struct Message<T> {
+    pub procedure: ProcedureId,
+    pub data: T,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum MessageKind {
-    Notification = 0,
+pub struct IncomingMessage {
+    pub data: Box<IncrementalDeserialize + Send>,
+}
+impl fmt::Debug for IncomingMessage {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "IncomingMessage {{ .. }}")
+    }
 }
 
 pub struct OutgoingMessage {
     procedure: ProcedureId,
-    kind: MessageKind,
     data: Box<IncrementalSerialize + Send>,
 
     is_header_written: bool,
@@ -26,24 +30,17 @@ impl OutgoingMessage {
     where
         T: IncrementalSerialize + Send + 'static,
     {
-        match message {
-            Message::Notification { procedure, data } => OutgoingMessage {
-                procedure,
-                kind: MessageKind::Notification,
-                data: Box::new(data),
-                is_header_written: false,
-            },
+        OutgoingMessage {
+            procedure: message.procedure,
+            data: Box::new(message.data),
+            is_header_written: false,
         }
     }
 }
 
 impl fmt::Debug for OutgoingMessage {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "OutgoingMessage {{ procedure:{}, kind:{:?}, .. }}",
-            self.procedure, self.kind
-        )
+        write!(f, "OutgoingMessage {{ procedure:{}, .. }}", self.procedure,)
     }
 }
 impl IncrementalSerialize for OutgoingMessage {
@@ -54,9 +51,8 @@ impl IncrementalSerialize for OutgoingMessage {
                 buf.write_u32::<BigEndian>(self.procedure)
                     .map_err(Error::from)
             )?;
-            track!(buf.write_u8(self.kind as u8).map_err(Error::from))?;
             self.is_header_written = true;
-            size = 5;
+            size = 4;
         }
         size += track!(self.data.incremental_serialize(buf))?;
         Ok(size)

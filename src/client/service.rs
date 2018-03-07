@@ -70,16 +70,17 @@ impl RpcClientService {
                         let command_tx = self.command_tx.clone();
                         let mut channels = channels.clone();
                         let (channel, handle) = RpcChannel::new(logger.clone(), server);
-                        self.spawner.spawn(channel.then(move |result| {
-                            if let Err(e) = result {
-                                error!(logger, "A client-side RPC channel aborted: {}", e);
-                            } else {
-                                info!(logger, "A client-side RPC channel was closed");
-                            }
-                            let command = Command::RemoveChannel { server };
-                            let _ = command_tx.send(command);
-                            Ok(())
-                        }));;
+                        self.spawner
+                            .spawn(channel.for_each(|m| Ok(())).then(move |result| {
+                                if let Err(e) = result {
+                                    error!(logger, "A client-side RPC channel aborted: {}", e);
+                                } else {
+                                    info!(logger, "A client-side RPC channel was closed");
+                                }
+                                let command = Command::RemoveChannel { server };
+                                let _ = command_tx.send(command);
+                                Ok(())
+                            }));;
                         channels.insert(server, handle);
                         channels
                     });

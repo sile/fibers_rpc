@@ -1,3 +1,4 @@
+use std::fmt;
 use std::io::{Cursor, Read, Write};
 use futures::{Future, Poll};
 
@@ -28,6 +29,23 @@ pub trait IncrementalSerialize {
 
 pub trait IncrementalDeserialize {
     fn incremental_deserialize(&mut self, buf: &[u8]) -> Result<()>;
+
+    fn finish(&mut self) -> Result<()> {
+        // TODO: remove default
+        Ok(())
+    }
+}
+
+// TODO:
+pub trait Factory {
+    fn create_instance(&mut self) -> ::message::IncomingMessage;
+}
+
+pub struct BoxFactory(pub Box<Factory + Send>);
+impl fmt::Debug for BoxFactory {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "BoxFactory(_)")
+    }
 }
 
 pub trait Serialize: Sized {
