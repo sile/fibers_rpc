@@ -50,3 +50,8 @@ impl<T: AsRef<[u8]>> IncrementalSerialize for Cursor<T> {
         self.read(buf).map_err(Error::from)
     }
 }
+impl IncrementalDeserialize for Cursor<Vec<u8>> {
+    fn incremental_deserialize(&mut self, buf: &[u8]) -> Result<()> {
+        self.write_all(buf).map_err(Error::from)
+    }
+}
