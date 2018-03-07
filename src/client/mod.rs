@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 pub use self::service::{RpcClientService, RpcClientServiceBuilder};
 
 use message::{Message, OutgoingMessage};
-use traits::{Cast, IncrementalSerialize};
+use traits::Cast;
 use self::service::RpcClientServiceHandle;
 
 mod service;
@@ -14,10 +14,9 @@ pub struct RpcClient {
 }
 impl RpcClient {
     pub fn cast<T: Cast>(&self, server: SocketAddr, notification: T::Notification) {
-        let data: Box<IncrementalSerialize + Send> = Box::new(notification);
-        let message = OutgoingMessage(Message::Notification {
+        let message = OutgoingMessage::new(Message::Notification {
             procedure: T::PROCEDURE,
-            data,
+            data: notification,
         });
         self.service.send_message(server, message);
     }
