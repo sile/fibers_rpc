@@ -12,7 +12,7 @@ use futures::{Async, Future, Poll, Stream};
 use {Error, ErrorKind, ProcedureId, Result};
 use channel::{RpcChannel, RpcChannelHandle};
 use frame::{Frame, HandleFrame};
-use traits::{Cast, Decode, HandleCast};
+use traits::{Call, Cast, Decode, HandleCall, HandleCast};
 
 // TODO: rename (message handler?)
 pub trait Deserializer {
@@ -21,6 +21,7 @@ pub trait Deserializer {
     fn finish(&mut self) -> Result<Self::Target>;
 }
 
+// TODO: rename
 struct CastHandler(
     Box<for<'a> FnMut(&'a [u8], bool) -> Result<Option<::traits::Response>> + Send + 'static>,
 );
@@ -76,6 +77,48 @@ impl MsgHandleFactory for CastHandlerFactory {
     }
 }
 
+struct CallHandlerFactory(
+    Box<
+        Fn() -> Box<Deserializer<Target = ::traits::Response> + Send + 'static>
+            + Send
+            + Sync
+            + 'static,
+    >,
+);
+impl CallHandlerFactory {
+    fn new<T: Call, H: HandleCall<T>>(handler: H) -> Self
+    where
+        T::RequestDecoder: Default,
+    {
+        let handler = Arc::new(handler);
+        let f = move || {
+            let mut decoder = Some(<T::RequestDecoder as Default>::default());
+            let handler = handler.clone();
+            let handle = move |buf: &[u8], eof| {
+                track!(decoder.as_mut().unwrap().decode(buf))?;
+                if eof {
+                    let data = track!(decoder.take().unwrap().finish())?;
+                    let future = handler.handle_call(data);
+                    Ok(Some(::traits::Response::Reply(future.boxed())))
+                } else {
+                    Ok(None)
+                }
+            };
+            let call_handler = CastHandler(Box::new(handle));
+            let call_handler: Box<
+                Deserializer<Target = ::traits::Response> + Send + 'static,
+            > = Box::new(call_handler);
+            call_handler
+        };
+        CallHandlerFactory(Box::new(f))
+    }
+}
+impl MsgHandleFactory for CallHandlerFactory {
+    fn create(&self) -> Box<Deserializer<Target = ::traits::Response> + Send + 'static> {
+        (self.0)()
+    }
+}
+
 pub struct RpcServerBuilder {
     bind_addr: SocketAddr,
     logger: Logger,
@@ -91,6 +134,16 @@ impl RpcServerBuilder {
     }
     pub fn logger(mut self, logger: Logger) -> Self {
         self.logger = logger;
+        self
+    }
+
+    pub fn call_handler<T: Call, H: HandleCall<T>>(mut self, handler: H) -> Self
+    where
+        T::RequestDecoder: Default,
+    {
+        // TODO: check duplication
+        self.handlers
+            .insert(T::PROCEDURE, Box::new(CallHandlerFactory::new(handler)));
         self
     }
 

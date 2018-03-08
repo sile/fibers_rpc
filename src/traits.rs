@@ -15,6 +15,14 @@ pub trait HandleCall<T: Call>: Send + Sync + 'static {
 #[derive(Debug)]
 pub enum Response {
     NoReply(NoReply),
+    Reply(BoxReply),
+}
+impl Future for Response {
+    type Item = Option<Encodable>;
+    type Error = Error;
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        unimplemented!()
+    }
 }
 
 // TODO: add no future version
@@ -28,8 +36,17 @@ impl Future for NoReply {
     }
 }
 
+// TODO:
+#[derive(Debug)]
+pub struct BoxReply;
+
 #[derive(Debug)]
 pub struct Reply<T>(T);
+impl<T> Reply<T> {
+    pub fn boxed(self) -> BoxReply {
+        BoxReply
+    }
+}
 impl<T> Future for Reply<T> {
     type Item = T;
     type Error = ();

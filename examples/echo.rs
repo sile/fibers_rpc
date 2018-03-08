@@ -98,6 +98,7 @@ fn main() {
         let server = RpcServerBuilder::new(addr)
             .logger(logger)
             .register_cast_handler(EchoHandler)
+            .call_handler(EchoHandler)
             .finish(executor.handle());
         let fiber = executor.spawn_monitor(server);
         let _ = track_try_unwrap!(executor.run_fiber(fiber).map_err(Failure::from_error))
