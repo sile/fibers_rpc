@@ -1,12 +1,20 @@
 use std::fmt;
-use std::io::{Cursor, Read, Write};
+use std::io::{Cursor, Read};
 use futures::{Future, Poll};
 
 use {Error, ProcedureId, Result};
 
-pub trait HandleCast<T: Cast>: Clone + Send + 'static {
-    fn init(&self) -> T::Notification;
-    fn handle_cast(self, notification: T::Notification) -> NoReply;
+pub trait HandleCast<T: Cast>: Send + Sync + 'static {
+    fn handle_cast(&self, notification: T::Notification) -> NoReply;
+}
+
+pub trait HandleCall<T: Call>: Send + Sync + 'static {
+    fn handle_call(&self, request: T::Request) -> Reply<T::Response>;
+}
+
+#[derive(Debug)]
+pub enum Response {
+    NoReply(NoReply),
 }
 
 // TODO: add no future version
@@ -20,73 +28,81 @@ impl Future for NoReply {
     }
 }
 
+#[derive(Debug)]
+pub struct Reply<T>(T);
+impl<T> Future for Reply<T> {
+    type Item = T;
+    type Error = ();
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        unimplemented!()
+    }
+}
+
+pub trait Call {
+    const PROCEDURE: ProcedureId;
+    type Request;
+    type Response;
+
+    type RequestEncoder: Encode<Self::Request> + Send + 'static;
+    type RequestDecoder: Decode<Self::Request> + Send + 'static;
+    type ResponseEncoder: Encode<Self::Response> + Send + 'static;
+    type ResponseDecoder: Decode<Self::Response> + Send + 'static;
+}
+
 pub trait Cast {
     const PROCEDURE: ProcedureId;
-    type Notification: IncrementalSerialize + IncrementalDeserialize + Send + 'static;
+    type Notification;
+
+    type Encoder: Encode<Self::Notification> + Send + 'static;
+    type Decoder: Decode<Self::Notification> + Send + 'static;
 }
 
-pub trait IncrementalSerialize {
-    fn incremental_serialize(&mut self, buf: &mut [u8]) -> Result<usize>;
+pub trait Decode<T> {
+    fn decode(&mut self, buf: &[u8]) -> Result<()>;
+    fn finish(self) -> Result<T>;
 }
 
-pub trait IncrementalDeserialize {
-    fn incremental_deserialize(&mut self, buf: &[u8]) -> Result<()>;
+pub trait Encode<T> {
+    fn encode(&mut self, buf: &mut [u8]) -> Result<usize>;
 
-    fn finish(&mut self) -> Result<()> {
-        // TODO: remove default
+    fn into_encodable(mut self) -> Encodable
+    where
+        Self: Sized + Send + 'static,
+    {
+        Encodable(Box::new(move |buf| track!(self.encode(buf))))
+    }
+}
+
+pub struct Encodable(Box<FnMut(&mut [u8]) -> Result<usize> + Send + 'static>);
+impl Encodable {
+    pub fn new<T, E>(mut encoder: E) -> Self
+    where
+        E: Encode<T> + Send + 'static,
+    {
+        Encodable(Box::new(move |buf| track!(encoder.encode(buf))))
+    }
+    pub fn encode(&mut self, buf: &mut [u8]) -> Result<usize> {
+        track!((self.0)(buf))
+    }
+}
+impl fmt::Debug for Encodable {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Encodable(_)")
+    }
+}
+
+impl<T: AsRef<[u8]>> Encode<T> for Cursor<T> {
+    fn encode(&mut self, buf: &mut [u8]) -> Result<usize> {
+        track!(self.read(buf).map_err(Error::from))
+    }
+}
+
+impl Decode<Vec<u8>> for Vec<u8> {
+    fn decode(&mut self, buf: &[u8]) -> Result<()> {
+        self.extend_from_slice(buf);
         Ok(())
     }
-}
-
-// TODO:
-pub trait Factory {
-    fn create_instance(&mut self) -> ::message::IncomingMessage;
-}
-
-pub struct BoxFactory(pub Box<Factory + Send>);
-impl fmt::Debug for BoxFactory {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "BoxFactory(_)")
-    }
-}
-
-pub trait Serialize: Sized {
-    fn serialize<W: Write>(&self, writer: W) -> Result<()>;
-    fn into_serializable(self) -> Serializable<Self> {
-        Serializable {
-            object: Some(self),
-            buffer: Cursor::new(Vec::new()),
-        }
-    }
-}
-
-pub trait Deserialize: Sized {
-    fn deserialize<R: Read>(reader: R) -> Result<Self>;
-}
-
-#[derive(Debug)]
-pub struct Serializable<T> {
-    object: Option<T>,
-    buffer: Cursor<Vec<u8>>,
-}
-impl<T: Serialize> IncrementalSerialize for Serializable<T> {
-    fn incremental_serialize(&mut self, buf: &mut [u8]) -> Result<usize> {
-        if let Some(object) = self.object.take() {
-            let mut buffer = Vec::new();
-            track!(object.serialize(&mut buffer))?;
-            self.buffer = Cursor::new(buffer);
-        }
-        track!(self.buffer.incremental_serialize(buf))
-    }
-}
-
-impl<T: AsRef<[u8]>> IncrementalSerialize for Cursor<T> {
-    fn incremental_serialize(&mut self, buf: &mut [u8]) -> Result<usize> {
-        self.read(buf).map_err(Error::from)
-    }
-}
-impl IncrementalDeserialize for Cursor<Vec<u8>> {
-    fn incremental_deserialize(&mut self, buf: &[u8]) -> Result<()> {
-        self.write_all(buf).map_err(Error::from)
+    fn finish(self) -> Result<Vec<u8>> {
+        Ok(self)
     }
 }

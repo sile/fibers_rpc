@@ -1,60 +1,33 @@
-use std::fmt;
-use byteorder::{BigEndian, WriteBytesExt};
+use byteorder::{BigEndian, ByteOrder};
 
-use {Error, ProcedureId, Result};
-use traits::{IncrementalDeserialize, IncrementalSerialize};
+use {ErrorKind, ProcedureId, Result};
+use traits::Encode;
 
 #[derive(Debug)]
-pub struct Message<T> {
-    pub procedure: ProcedureId,
-    pub data: T,
+pub struct OutgoingMessage<E> {
+    procedure: Option<ProcedureId>,
+    encoder: E,
 }
-
-pub struct IncomingMessage {
-    pub data: Box<IncrementalDeserialize + Send>,
-}
-impl fmt::Debug for IncomingMessage {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "IncomingMessage {{ .. }}")
-    }
-}
-
-pub struct OutgoingMessage {
-    procedure: ProcedureId,
-    data: Box<IncrementalSerialize + Send>,
-
-    is_header_written: bool,
-}
-impl OutgoingMessage {
-    pub fn new<T>(message: Message<T>) -> Self
-    where
-        T: IncrementalSerialize + Send + 'static,
-    {
+impl<E> OutgoingMessage<E> {
+    pub fn new(procedure: ProcedureId, encoder: E) -> Self {
         OutgoingMessage {
-            procedure: message.procedure,
-            data: Box::new(message.data),
-            is_header_written: false,
+            procedure: Some(procedure),
+            encoder,
         }
     }
 }
-
-impl fmt::Debug for OutgoingMessage {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "OutgoingMessage {{ procedure:{}, .. }}", self.procedure,)
-    }
-}
-impl IncrementalSerialize for OutgoingMessage {
-    fn incremental_serialize(&mut self, mut buf: &mut [u8]) -> Result<usize> {
-        let mut size = 0;
-        if !self.is_header_written {
-            track!(
-                buf.write_u32::<BigEndian>(self.procedure)
-                    .map_err(Error::from)
-            )?;
-            self.is_header_written = true;
-            size = 4;
+impl<T, E> Encode<T> for OutgoingMessage<E>
+where
+    E: Encode<T>,
+{
+    fn encode(&mut self, buf: &mut [u8]) -> Result<usize> {
+        let mut written_size = 0;
+        if let Some(id) = self.procedure.take() {
+            track_assert!(buf.len() >= 4, ErrorKind::InvalidInput);
+            BigEndian::write_u32(buf, id);
+            written_size = 4;
         }
-        size += track!(self.data.incremental_serialize(buf))?;
-        Ok(size)
+        written_size += track!(self.encoder.encode(&mut buf[written_size..]))?;
+        Ok(written_size)
     }
 }

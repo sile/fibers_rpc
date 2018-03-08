@@ -1,7 +1,6 @@
 use std::collections::HashMap;
-use std::fmt;
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use slog::{Discard, Logger};
 use byteorder::{BigEndian, ByteOrder};
 use fibers::{BoxSpawn, Spawn};
@@ -12,60 +11,75 @@ use futures::{Async, Future, Poll, Stream};
 
 use {Error, ErrorKind, ProcedureId, Result};
 use channel::{RpcChannel, RpcChannelHandle};
-use traits::{Cast, HandleCast, IncrementalDeserialize};
+use frame::{Frame, HandleFrame};
+use traits::{Cast, Decode, HandleCast};
 
-pub trait HandleMessage {
-    fn consume_buf(&mut self, buf: &[u8]) -> Result<()>;
-    fn box_clone(&self) -> Box<HandleMessage + Send + 'static>;
+// TODO: rename (message handler?)
+pub trait Deserializer {
+    type Target;
+    fn deserialize(&mut self, buf: &[u8]) -> Result<()>;
+    fn finish(&mut self) -> Result<Self::Target>;
 }
 
-struct CastMessageHandler {
-    // handler: Option<Box<HandleMessage + Send + 'static>>,
-    handler: Option<Box<for<'a> FnMut(&'a [u8]) -> Result<()> + Send + 'static>>,
-    clone_fn: Option<Arc<Mutex<Box<Fn() -> Box<HandleMessage + Send + 'static> + Send + 'static>>>>,
-}
-impl CastMessageHandler {
-    fn new<T: Cast, H: HandleCast<T>>(handler: H) -> Self {
-        CastMessageHandler {
-            handler: None,
-            clone_fn: Some(Arc::new(Mutex::new(Box::new(move || {
-                let handler = handler.clone();
-                let mut notification = Some(handler.init());
-                let h = Box::new(move |buf: &[u8]| {
-                    //
-                    track!(notification.as_mut().unwrap().incremental_deserialize(buf))?;
-                    if buf.len() < 0xFFF0 {
-                        let _todo_future =
-                            handler.clone().handle_cast(notification.take().unwrap());
-                        Ok(())
-                    } else {
-                        Ok(())
-                    }
-                });
-                Box::new(CastMessageHandler {
-                    handler: Some(h),
-                    clone_fn: None,
-                })
-            })))),
-        }
+struct CastHandler(
+    Box<for<'a> FnMut(&'a [u8], bool) -> Result<Option<::traits::Response>> + Send + 'static>,
+);
+impl Deserializer for CastHandler {
+    type Target = ::traits::Response;
+    fn deserialize(&mut self, buf: &[u8]) -> Result<()> {
+        track!((self.0)(buf, false)).map(|_| ())
     }
-}
-impl HandleMessage for CastMessageHandler {
-    fn consume_buf(&mut self, buf: &[u8]) -> Result<()> {
-        let f = self.handler.as_mut().expect("TODO");
-        track!(f(buf))
-    }
-    fn box_clone(&self) -> Box<HandleMessage + Send + 'static> {
-        let f = self.clone_fn.as_ref().expect("TODO").lock().expect("TOOD");
-        f()
+    fn finish(&mut self) -> Result<Self::Target> {
+        track!((self.0)(&[][..], true)).map(|r| r.unwrap())
     }
 }
 
-#[derive(Debug, Clone)]
+struct CastHandlerFactory(
+    Box<
+        Fn() -> Box<Deserializer<Target = ::traits::Response> + Send + 'static>
+            + Send
+            + Sync
+            + 'static,
+    >,
+);
+impl CastHandlerFactory {
+    fn new<T: Cast, H: HandleCast<T>>(handler: H) -> Self
+    where
+        T::Decoder: Default,
+    {
+        let handler = Arc::new(handler);
+        let f = move || {
+            let mut decoder = Some(<T::Decoder as Default>::default()); //Some(handler.create_decoder());
+            let handler = handler.clone();
+            let handle = move |buf: &[u8], eof| {
+                track!(decoder.as_mut().unwrap().decode(buf))?;
+                if eof {
+                    let data = track!(decoder.take().unwrap().finish())?;
+                    let future = handler.handle_cast(data);
+                    Ok(Some(::traits::Response::NoReply(future)))
+                } else {
+                    Ok(None)
+                }
+            };
+            let cast_handler = CastHandler(Box::new(handle));
+            let cast_handler: Box<
+                Deserializer<Target = ::traits::Response> + Send + 'static,
+            > = Box::new(cast_handler);
+            cast_handler
+        };
+        CastHandlerFactory(Box::new(f))
+    }
+}
+impl MsgHandleFactory for CastHandlerFactory {
+    fn create(&self) -> Box<Deserializer<Target = ::traits::Response> + Send + 'static> {
+        (self.0)()
+    }
+}
+
 pub struct RpcServerBuilder {
     bind_addr: SocketAddr,
     logger: Logger,
-    handlers: HashMap<ProcedureId, MessageHandlerFactory>,
+    handlers: HashMap<ProcedureId, Box<MsgHandleFactory + Send + Sync + 'static>>,
 }
 impl RpcServerBuilder {
     pub fn new(bind_addr: SocketAddr) -> Self {
@@ -75,23 +89,22 @@ impl RpcServerBuilder {
             handlers: HashMap::new(),
         }
     }
-    pub fn logger(&mut self, logger: Logger) -> &mut Self {
+    pub fn logger(mut self, logger: Logger) -> Self {
         self.logger = logger;
         self
     }
 
-    pub fn register_cast_handler<T: Cast, H: HandleCast<T>>(&mut self, handler: H) -> &mut Self {
+    pub fn register_cast_handler<T: Cast, H: HandleCast<T>>(mut self, handler: H) -> Self
+    where
+        T::Decoder: Default,
+    {
         // TODO: check duplication
-        self.handlers.insert(
-            T::PROCEDURE,
-            MessageHandlerFactory(Arc::new(Mutex::new(Box::new(CastMessageHandler::new(
-                handler,
-            ))))),
-        );
+        self.handlers
+            .insert(T::PROCEDURE, Box::new(CastHandlerFactory::new(handler)));
         self
     }
 
-    pub fn finish<S>(&self, spawner: S) -> RpcServer
+    pub fn finish<S>(self, spawner: S) -> RpcServer
     where
         S: Spawn + Send + 'static,
     {
@@ -101,17 +114,16 @@ impl RpcServerBuilder {
             listener: Listener::Binding(TcpListener::bind(self.bind_addr)),
             logger,
             spawner: spawner.boxed(),
-            factory: IncomingMessageFactory::new(self.handlers.clone()),
+            frame_handler: FrameHandler::new(self.handlers),
         }
     }
 }
 
-#[derive(Debug)]
 pub struct RpcServer {
     listener: Listener,
     logger: Logger,
     spawner: BoxSpawn,
-    factory: IncomingMessageFactory,
+    frame_handler: FrameHandler,
 }
 impl Future for RpcServer {
     type Item = ();
@@ -124,11 +136,13 @@ impl Future for RpcServer {
                 info!(logger, "New TCP client");
 
                 let exit_logger = logger.clone();
-                let factory = self.factory.clone();
+                let frame_handler = self.frame_handler.clone();
                 self.spawner.spawn(
                     client
                         .map_err(|e| track!(Error::from(e)))
-                        .and_then(move |stream| TcpStreamHandler::new(logger, stream, factory))
+                        .and_then(move |stream| {
+                            TcpStreamHandler::new(logger, stream, frame_handler)
+                        })
                         .then(move |result| {
                             if let Err(e) = result {
                                 error!(exit_logger, "TCP connection aborted: {}", e);
@@ -147,92 +161,67 @@ impl Future for RpcServer {
     }
 }
 
-#[derive(Clone)]
-struct MessageHandlerFactory(Arc<Mutex<Box<HandleMessage + Send + 'static>>>);
-impl MessageHandlerFactory {
-    fn create(&self) -> MessageHandler {
-        let h = self.0.lock().expect("TODO").box_clone();
-        MessageHandler(h)
-    }
-}
-impl fmt::Debug for MessageHandlerFactory {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "MessageHandlerFactory(_)")
-    }
+pub trait MsgHandleFactory {
+    fn create(&self) -> Box<Deserializer<Target = ::traits::Response> + Send + 'static>;
 }
 
-struct MessageHandler(Box<HandleMessage + Send + 'static>);
-impl ::traits::IncrementalDeserialize for MessageHandler {
-    fn incremental_deserialize(&mut self, buf: &[u8]) -> Result<()> {
-        track!(self.0.consume_buf(buf))
-    }
-
-    fn finish(&mut self) -> Result<()> {
-        // TODO: spawn handler
-        unimplemented!()
-    }
+struct FrameHandler {
+    handlers: Arc<HashMap<ProcedureId, Box<MsgHandleFactory + Send + Sync + 'static>>>,
+    active_handlers: HashMap<u32, Box<Deserializer<Target = ::traits::Response> + Send + 'static>>,
 }
-
-struct IncomingMessageDispatcher {
-    handlers: Arc<HashMap<ProcedureId, MessageHandlerFactory>>,
-    handler: Option<MessageHandler>,
-}
-impl IncomingMessageDispatcher {
-    fn new(handlers: Arc<HashMap<ProcedureId, MessageHandlerFactory>>) -> Self {
-        IncomingMessageDispatcher {
-            handlers,
-            handler: None,
-        }
-    }
-}
-impl ::traits::IncrementalDeserialize for IncomingMessageDispatcher {
-    fn incremental_deserialize(&mut self, buf: &[u8]) -> Result<()> {
-        if let Some(ref mut handler) = self.handler {
-            track!(handler.incremental_deserialize(buf))
-        } else {
-            track_assert!(buf.len() >= 4, ErrorKind::InvalidInput);
-            let procedure = BigEndian::read_u32(buf);
-            if let Some(handler_factory) = self.handlers.get(&procedure) {
-                let mut handler = handler_factory.create();
-                track!(handler.incremental_deserialize(&buf[4..]))?;
-                self.handler = Some(handler);
-                Ok(())
-            } else {
-                track_panic!(ErrorKind::InvalidInput, "Unknown procedure: {}", procedure);
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-struct IncomingMessageFactory {
-    handlers: Arc<HashMap<ProcedureId, MessageHandlerFactory>>,
-}
-impl IncomingMessageFactory {
-    fn new(handlers: HashMap<ProcedureId, MessageHandlerFactory>) -> Self {
-        IncomingMessageFactory {
+impl FrameHandler {
+    fn new(handlers: HashMap<ProcedureId, Box<MsgHandleFactory + Send + Sync + 'static>>) -> Self {
+        FrameHandler {
             handlers: Arc::new(handlers),
+            active_handlers: HashMap::new(),
         }
     }
 }
-impl ::traits::Factory for IncomingMessageFactory {
-    fn create_instance(&mut self) -> ::message::IncomingMessage {
-        let dispatcher = IncomingMessageDispatcher::new(self.handlers.clone());
-        ::message::IncomingMessage {
-            data: Box::new(dispatcher),
+impl Clone for FrameHandler {
+    fn clone(&self) -> Self {
+        FrameHandler {
+            handlers: self.handlers.clone(),
+            active_handlers: HashMap::new(),
+        }
+    }
+}
+impl HandleFrame for FrameHandler {
+    type Future = ::traits::Response;
+    fn handle_frame(&mut self, frame: &Frame) -> Result<Option<Self::Future>> {
+        track_assert!(!frame.is_error(), ErrorKind::Other, "TODO");
+
+        let mut offset = 0;
+        if !self.active_handlers.contains_key(&frame.seqno) {
+            track_assert!(frame.data.len() >= 4, ErrorKind::InvalidInput);
+            let procedure = BigEndian::read_u32(&frame.data);
+            offset = 4;
+
+            let factory =
+                track_assert_some!(self.handlers.get(&procedure), ErrorKind::InvalidInput);
+            let handler = factory.create();
+            self.active_handlers.insert(frame.seqno, handler);
+        }
+
+        let mut handler = self.active_handlers
+            .remove(&frame.seqno)
+            .expect("Never fails");
+        track!(handler.deserialize(&frame.data[offset..]))?; // TODO: handle error
+        if frame.is_eof() {
+            let future = track!(handler.finish())?;
+            Ok(Some(future))
+        } else {
+            Ok(None)
         }
     }
 }
 
-#[derive(Debug)]
 struct TcpStreamHandler {
-    channel: RpcChannel,
+    channel: RpcChannel<FrameHandler>,
     channel_handle: RpcChannelHandle,
 }
 impl TcpStreamHandler {
-    fn new(logger: Logger, stream: TcpStream, factory: IncomingMessageFactory) -> Self {
-        let factory = ::traits::BoxFactory(Box::new(factory));
-        let (channel, channel_handle) = RpcChannel::with_stream(logger, stream, factory);
+    fn new(logger: Logger, stream: TcpStream, frame_handler: FrameHandler) -> Self {
+        let (channel, channel_handle) = RpcChannel::with_stream(logger, stream, frame_handler);
         TcpStreamHandler {
             channel,
             channel_handle,

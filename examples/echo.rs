@@ -23,17 +23,16 @@ use trackable::error::{ErrorKindExt, Failed, Failure};
 struct EchoRpc;
 impl Cast for EchoRpc {
     const PROCEDURE: ProcedureId = 0;
-    type Notification = Cursor<Vec<u8>>;
+    type Notification = Vec<u8>;
+    type Encoder = Cursor<Vec<u8>>;
+    type Decoder = Vec<u8>;
 }
 
 #[derive(Clone)]
 struct EchoHandler;
 impl HandleCast<EchoRpc> for EchoHandler {
-    fn init(&self) -> <EchoRpc as Cast>::Notification {
-        Cursor::new(Vec::new())
-    }
     fn handle_cast(
-        self,
+        &self,
         notification: <EchoRpc as Cast>::Notification,
     ) -> fibers_rpc::traits::NoReply {
         println!("# RECV: {:?}", notification);
@@ -97,7 +96,10 @@ fn main() {
                 .read_to_end(&mut buf)
                 .map_err(Failure::from_error)
         );
-        client.cast::<EchoRpc>(addr, Cursor::new(buf));
+        client
+            .cast_options::<EchoRpc>()
+            .with_encoder(Cursor::new)
+            .cast(addr, buf);
 
         track_try_unwrap!(executor.run().map_err(Failure::from_error));
     } else {

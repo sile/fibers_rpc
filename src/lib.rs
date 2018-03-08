@@ -15,6 +15,7 @@ pub mod traits;
 
 mod channel;
 mod error;
+pub mod frame; // TODO
 mod message;
 
 /// This crate specific `Result` type.

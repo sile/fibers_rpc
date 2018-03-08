@@ -9,7 +9,7 @@ use futures::{Async, Future, Poll, Stream};
 
 use Error;
 use channel::{RpcChannel, RpcChannelHandle};
-use message::OutgoingMessage;
+use traits::Encodable;
 use super::RpcClient;
 
 #[derive(Debug)]
@@ -69,7 +69,8 @@ impl RpcClientService {
                         info!(logger, "New client-side RPC channel is created");
                         let command_tx = self.command_tx.clone();
                         let mut channels = channels.clone();
-                        let (channel, handle) = RpcChannel::new(logger.clone(), server);
+                        let (channel, handle) =
+                            RpcChannel::<::frame::DummyFrameHandler>::new(logger.clone(), server);
                         self.spawner
                             .spawn(channel.for_each(|m| Ok(())).then(move |result| {
                                 if let Err(e) = result {
@@ -119,7 +120,7 @@ pub struct RpcClientServiceHandle {
     channels: Arc<AtomicImmut<HashMap<SocketAddr, RpcChannelHandle>>>,
 }
 impl RpcClientServiceHandle {
-    pub fn send_message(&self, server: SocketAddr, message: OutgoingMessage) {
+    pub fn send_message(&self, server: SocketAddr, message: Encodable) {
         if let Some(channel) = self.channels.load().get(&server) {
             channel.send_message(message);
         } else {
@@ -136,7 +137,7 @@ impl RpcClientServiceHandle {
 enum Command {
     CreateChannel {
         server: SocketAddr,
-        message: Option<OutgoingMessage>,
+        message: Option<Encodable>,
     },
     RemoveChannel {
         server: SocketAddr,
