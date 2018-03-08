@@ -27,6 +27,17 @@ impl<'a, T: Cast, F> WithEncoder<'a, CastOptions<'a, T>, F> {
         self.inner.execute(server, encoder);
     }
 }
+impl<'a, T: Call, F> WithEncoder<'a, CallOptions<'a, T>, F> {
+    pub fn call(self, server: SocketAddr, request: T::Request) -> RpcCall<T>
+    where
+        F: FnOnce(T::Request) -> T::RequestEncoder,
+        T::ResponseDecoder: Default,
+    {
+        let encoder = (self.into_encoder)(request);
+        let decoder = Default::default();
+        self.inner.execute(server, encoder, decoder)
+    }
+}
 
 #[derive(Debug)]
 pub struct CastOptions<'a, T> {
@@ -67,6 +78,64 @@ impl<'a, T: Cast> CastOptions<'a, T> {
     }
 }
 
+#[derive(Debug)]
+pub struct CallOptions<'a, T> {
+    client: &'a RpcClient,
+    _rpc: PhantomData<T>,
+}
+impl<'a, T: Call> CallOptions<'a, T> {
+    fn new(client: &'a RpcClient) -> Self {
+        CallOptions {
+            client,
+            _rpc: PhantomData,
+        }
+    }
+
+    pub fn with_encoder<F>(&self, into_encoder: F) -> WithEncoder<Self, F>
+    where
+        F: FnOnce(T::Request) -> T::RequestEncoder,
+    {
+        WithEncoder {
+            inner: self,
+            into_encoder,
+        }
+    }
+
+    pub fn call(&self, server: SocketAddr, request: T::Request) -> RpcCall<T>
+    where
+        T::RequestEncoder: From<T::Request>,
+        T::ResponseDecoder: Default,
+    {
+        let encoder = From::from(request);
+        let decoder = Default::default();
+        self.execute(server, encoder, decoder)
+    }
+
+    fn execute(
+        &self,
+        server: SocketAddr,
+        encoder: T::RequestEncoder,
+        decoder: T::ResponseDecoder,
+    ) -> RpcCall<T> {
+        let (response_tx, response_rx) = oneshot::monitor();
+        let decoder: ResponseDecoder<T::Response, T::ResponseDecoder> = ResponseDecoder {
+            decoder,
+            response_tx: Some(response_tx),
+        };
+        let message = RequestMesasge {
+            phase: 0,
+            procedure: T::PROCEDURE,
+            request_id: 0, // TODO: remove
+            request_data: encoder.into_encodable(),
+            response_decoder: decoder.boxed(),
+        };
+        self.client
+            .service
+            .send_message(server, Message::Request(message));
+        RpcCall(response_rx)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct RpcClient {
     service: RpcClientServiceHandle,
@@ -88,20 +157,11 @@ impl RpcClient {
         T::RequestEncoder: From<T::Request>,
         T::ResponseDecoder: Default,
     {
-        let (response_tx, response_rx) = oneshot::monitor();
-        let decoder: ResponseDecoder<T::Response, T::ResponseDecoder> = ResponseDecoder {
-            decoder: Default::default(),
-            response_tx: Some(response_tx),
-        };
-        let message = RequestMesasge {
-            phase: 0,
-            procedure: T::PROCEDURE,
-            request_id: 0, // TODO: remove
-            request_data: <T::RequestEncoder as From<_>>::from(request).into_encodable(),
-            response_decoder: decoder.boxed(),
-        };
-        self.service.send_message(server, Message::Request(message));
-        RpcCall(response_rx)
+        self.call_options().call(server, request)
+    }
+
+    pub fn call_options<T: Call>(&self) -> CallOptions<T> {
+        CallOptions::new(self)
     }
 }
 

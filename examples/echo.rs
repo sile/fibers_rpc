@@ -7,7 +7,7 @@ extern crate sloggers;
 extern crate trackable;
 
 use std::net::ToSocketAddrs;
-use std::io::{self, Cursor, Read};
+use std::io::{self, Cursor, Read, Write};
 use clap::{App, Arg, SubCommand};
 use fibers::{Executor, InPlaceExecutor, Spawn};
 use fibers_rpc::ProcedureId;
@@ -126,7 +126,10 @@ fn main() {
                 .call_options::<EchoRpc>()
                 .with_encoder(Cursor::new)
                 .call(addr, buf);
-            track_try_unwrap!(executor.run_future(future).map_err(Failure::from_error));
+            let result =
+                track_try_unwrap!(executor.run_future(future).map_err(Failure::from_error));
+            let response = track_try_unwrap!(result);
+            let _ = std::io::stdout().write(&response);
         }
     } else {
         println!("{}", matches.usage());
