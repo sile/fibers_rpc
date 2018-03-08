@@ -41,7 +41,7 @@ impl<T> Future for Reply<T> {
 pub trait Call {
     const PROCEDURE: ProcedureId;
     type Request;
-    type Response;
+    type Response: Send + 'static;
 
     type RequestEncoder: Encode<Self::Request> + Send + 'static;
     type RequestDecoder: Decode<Self::Request> + Send + 'static;
@@ -59,10 +59,35 @@ pub trait Cast {
 
 pub trait Decode<T> {
     fn decode(&mut self, buf: &[u8]) -> Result<()>;
-    fn finish(self) -> Result<T>;
+    fn finish(&mut self) -> Result<T>;
+
+    fn boxed(self) -> BoxDecoder<T>
+    where
+        Self: Sized + Send + 'static,
+    {
+        BoxDecoder(Box::new(self))
+    }
+}
+
+// TODO: rename
+pub struct BoxDecoder<T>(Box<Decode<T> + Send + 'static>);
+unsafe impl<T> Send for BoxDecoder<T> {}
+impl<T> Decode<T> for BoxDecoder<T> {
+    fn decode(&mut self, buf: &[u8]) -> Result<()> {
+        track!(self.0.decode(buf))
+    }
+    fn finish(&mut self) -> Result<T> {
+        self.0.finish()
+    }
+}
+impl<T> fmt::Debug for BoxDecoder<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "BoxDecoder(_)")
+    }
 }
 
 pub trait Encode<T> {
+    // Ok(0) = eos
     fn encode(&mut self, buf: &mut [u8]) -> Result<usize>;
 
     fn into_encodable(mut self) -> Encodable
@@ -102,7 +127,7 @@ impl Decode<Vec<u8>> for Vec<u8> {
         self.extend_from_slice(buf);
         Ok(())
     }
-    fn finish(self) -> Result<Vec<u8>> {
-        Ok(self)
+    fn finish(&mut self) -> Result<Vec<u8>> {
+        Ok(::std::mem::replace(self, Vec::new()))
     }
 }

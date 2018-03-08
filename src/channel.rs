@@ -13,7 +13,7 @@ use trackable::error::ErrorKindExt;
 
 use {Error, ErrorKind, Result};
 use frame::{DummyFrameHandler, Frame, FrameBuf, HandleFrame};
-use traits::Encodable;
+use message::Message;
 
 // TODO: parameter
 const RECONNECT_INTERVAL: u64 = 10_000;
@@ -21,12 +21,11 @@ const RECONNECT_INTERVAL: u64 = 10_000;
 #[derive(Debug)]
 pub struct RpcChannel<H> {
     connection: Connection,
-    outgoing_message_rx: mpsc::Receiver<Encodable>,
+    outgoing_message_rx: mpsc::Receiver<Message>,
     sending_messages: VecDeque<SendingMessage>,
     next_message_seqno: u32,
     frame: FrameBuf,
     read_frame: FrameBuf,
-
     frame_handler: H,
 }
 impl RpcChannel<DummyFrameHandler> {
@@ -39,7 +38,6 @@ impl RpcChannel<DummyFrameHandler> {
             next_message_seqno: 0,
             frame: FrameBuf::new(),
             read_frame: FrameBuf::new(),
-
             frame_handler: DummyFrameHandler,
         };
         let handle = RpcChannelHandle {
@@ -62,7 +60,6 @@ impl<H: HandleFrame> RpcChannel<H> {
             next_message_seqno: 0,
             frame: FrameBuf::new(),
             read_frame: FrameBuf::new(),
-
             frame_handler,
         };
         let handle = RpcChannelHandle {
@@ -77,6 +74,8 @@ impl<H: HandleFrame> Stream for RpcChannel<H> {
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
         while let Async::Ready(message) = self.outgoing_message_rx.poll().expect("Never fails") {
             if let Some(message) = message {
+                // TODO: 外だし
+                // (この中で`Message`ではなく`Encodable`だけを意識するようにしたい and message_rxは外に)
                 let message = SendingMessage::new(self.next_message_seqno, message);
                 self.next_message_seqno += 1;
                 self.sending_messages.push_back(message); // TODO: limit
@@ -120,10 +119,10 @@ impl<H: HandleFrame> Stream for RpcChannel<H> {
 
 #[derive(Debug, Clone)]
 pub struct RpcChannelHandle {
-    outgoing_message_tx: mpsc::Sender<Encodable>,
+    outgoing_message_tx: mpsc::Sender<Message>,
 }
 impl RpcChannelHandle {
-    pub fn send_message(&self, message: Encodable) {
+    pub fn send_message(&self, message: Message) {
         let _ = self.outgoing_message_tx.send(message); // TODO: metrics
     }
 }
@@ -131,10 +130,13 @@ impl RpcChannelHandle {
 #[derive(Debug)]
 struct SendingMessage {
     seqno: u32,
-    message: Encodable,
+    message: Message,
 }
 impl SendingMessage {
-    fn new(seqno: u32, message: Encodable) -> Self {
+    fn new(seqno: u32, mut message: Message) -> Self {
+        if let Message::Request(ref mut r) = message {
+            r.request_id = seqno; // TODO: 暫定
+        }
         SendingMessage { seqno, message }
     }
     fn fill_frame(&mut self, frame: &mut FrameBuf) -> Result<bool> {

@@ -13,7 +13,7 @@ use fibers::{Executor, InPlaceExecutor, Spawn};
 use fibers_rpc::ProcedureId;
 use fibers_rpc::client::RpcClientServiceBuilder;
 use fibers_rpc::server::RpcServerBuilder;
-use fibers_rpc::traits::{Cast, HandleCast};
+use fibers_rpc::traits::{Call, Cast, HandleCall, HandleCast};
 use futures::Future;
 use sloggers::Build;
 use sloggers::terminal::TerminalLoggerBuilder;
@@ -27,6 +27,16 @@ impl Cast for EchoRpc {
     type Encoder = Cursor<Vec<u8>>;
     type Decoder = Vec<u8>;
 }
+impl Call for EchoRpc {
+    const PROCEDURE: ProcedureId = 1;
+    type Request = Vec<u8>;
+    type RequestEncoder = Cursor<Vec<u8>>;
+    type RequestDecoder = Vec<u8>;
+
+    type Response = Vec<u8>;
+    type ResponseEncoder = Cursor<Vec<u8>>;
+    type ResponseDecoder = Vec<u8>;
+}
 
 #[derive(Clone)]
 struct EchoHandler;
@@ -37,6 +47,15 @@ impl HandleCast<EchoRpc> for EchoHandler {
     ) -> fibers_rpc::traits::NoReply {
         println!("# RECV: {:?}", notification);
         fibers_rpc::traits::NoReply
+    }
+}
+impl HandleCall<EchoRpc> for EchoHandler {
+    fn handle_call(
+        &self,
+        request: <EchoRpc as Call>::Request,
+    ) -> fibers_rpc::traits::Reply<<EchoRpc as Call>::Response> {
+        println!("# Request: {:?}", request);
+        unimplemented!()
     }
 }
 
@@ -56,7 +75,7 @@ fn main() {
                 .possible_values(&["debug", "info", "warning", "error"]),
         )
         .subcommand(SubCommand::with_name("server"))
-        .subcommand(SubCommand::with_name("client"))
+        .subcommand(SubCommand::with_name("client").arg(Arg::with_name("CAST").long("cast")))
         .get_matches();
 
     let addr = track_try_unwrap!(
@@ -96,12 +115,19 @@ fn main() {
                 .read_to_end(&mut buf)
                 .map_err(Failure::from_error)
         );
-        client
-            .cast_options::<EchoRpc>()
-            .with_encoder(Cursor::new)
-            .cast(addr, buf);
-
-        track_try_unwrap!(executor.run().map_err(Failure::from_error));
+        if matches.is_present("CAST") {
+            client
+                .cast_options::<EchoRpc>()
+                .with_encoder(Cursor::new)
+                .cast(addr, buf);
+            track_try_unwrap!(executor.run().map_err(Failure::from_error));
+        } else {
+            let future = client
+                .call_options::<EchoRpc>()
+                .with_encoder(Cursor::new)
+                .call(addr, buf);
+            track_try_unwrap!(executor.run_future(future).map_err(Failure::from_error));
+        }
     } else {
         println!("{}", matches.usage());
         std::process::exit(1);

@@ -9,7 +9,7 @@ use futures::{Async, Future, Poll, Stream};
 
 use Error;
 use channel::{RpcChannel, RpcChannelHandle};
-use traits::Encodable;
+use message::Message;
 use super::RpcClient;
 
 #[derive(Debug)]
@@ -120,7 +120,7 @@ pub struct RpcClientServiceHandle {
     channels: Arc<AtomicImmut<HashMap<SocketAddr, RpcChannelHandle>>>,
 }
 impl RpcClientServiceHandle {
-    pub fn send_message(&self, server: SocketAddr, message: Encodable) {
+    pub fn send_message(&self, server: SocketAddr, message: Message) {
         if let Some(channel) = self.channels.load().get(&server) {
             channel.send_message(message);
         } else {
@@ -137,7 +137,7 @@ impl RpcClientServiceHandle {
 enum Command {
     CreateChannel {
         server: SocketAddr,
-        message: Option<Encodable>,
+        message: Option<Message>,
     },
     RemoveChannel {
         server: SocketAddr,

@@ -1,7 +1,60 @@
 use byteorder::{BigEndian, ByteOrder};
 
 use {ErrorKind, ProcedureId, Result};
-use traits::Encode;
+use traits::{BoxDecoder, Encodable, Encode};
+
+#[derive(Debug)]
+pub enum Message {
+    Request(RequestMesasge),
+    Notification(Encodable), // TODO
+}
+impl Message {
+    pub fn encode(&mut self, buf: &mut [u8]) -> Result<usize> {
+        match *self {
+            Message::Request(ref mut x) => track!(x.encode(buf)),
+            Message::Notification(ref mut x) => track!(x.encode(buf)),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct RequestMesasge {
+    pub phase: u8, // TODO:
+
+    pub procedure: ProcedureId,
+    pub request_id: u32, // TODO: remove
+    pub request_data: Encodable,
+    pub response_decoder: BoxDecoder<()>,
+}
+impl RequestMesasge {
+    fn encode(&mut self, buf: &mut [u8]) -> Result<usize> {
+        let mut offset = 0;
+        while self.phase < 3 {
+            match self.phase {
+                0 => {
+                    BigEndian::write_u32(&mut buf[offset..], self.procedure);
+                    offset += 4;
+                    self.phase = 1;
+                }
+                1 => {
+                    BigEndian::write_u32(&mut buf[offset..], self.procedure);
+                    offset += 4;
+                    self.phase = 2;
+                }
+                2 => {
+                    let size = track!(self.request_data.encode(&mut buf[offset..]))?;
+                    offset += size;
+                    if size == 0 {
+                        self.phase = 3;
+                    }
+                    break;
+                }
+                _ => unreachable!(),
+            }
+        }
+        Ok(offset)
+    }
+}
 
 #[derive(Debug)]
 pub struct OutgoingMessage<E> {

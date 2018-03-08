@@ -7,7 +7,7 @@ use trackable::error::ErrorKindExt;
 pub use self::service::{RpcClientService, RpcClientServiceBuilder};
 
 use {Error, ErrorKind, Result};
-use message::OutgoingMessage;
+use message::{Message, OutgoingMessage, RequestMesasge};
 use traits::{Call, Cast, Decode, Encode};
 use self::service::RpcClientServiceHandle;
 
@@ -61,7 +61,9 @@ impl<'a, T: Cast> CastOptions<'a, T> {
 
     fn execute(&self, server: SocketAddr, encoder: T::Encoder) {
         let message = OutgoingMessage::<T::Encoder>::new(T::PROCEDURE, encoder).into_encodable();
-        self.client.service.send_message(server, message);
+        self.client
+            .service
+            .send_message(server, Message::Notification(message));
     }
 }
 
@@ -87,10 +89,18 @@ impl RpcClient {
         T::ResponseDecoder: Default,
     {
         let (response_tx, response_rx) = oneshot::monitor();
-        // let encoder = From::from(request);
-        // let decoder = Default::default().into_decodable();
-        // let message = OutgoingMessage::<T::RequestEncoder>(T::PROCEDURE, encoder).into_encodable();
-        // self.service.call(server, send_message(server, message);
+        let decoder: ResponseDecoder<T::Response, T::ResponseDecoder> = ResponseDecoder {
+            decoder: Default::default(),
+            response_tx: Some(response_tx),
+        };
+        let message = RequestMesasge {
+            phase: 0,
+            procedure: T::PROCEDURE,
+            request_id: 0, // TODO: remove
+            request_data: <T::RequestEncoder as From<_>>::from(request).into_encodable(),
+            response_decoder: decoder.boxed(),
+        };
+        self.service.send_message(server, Message::Request(message));
         RpcCall(response_rx)
     }
 }
@@ -126,7 +136,7 @@ where
             Ok(())
         }
     }
-    fn finish(mut self) -> Result<()> {
+    fn finish(&mut self) -> Result<()> {
         let response_tx = self.response_tx.take().expect("Never fails");
         match track!(self.decoder.finish()) {
             Err(e) => {
