@@ -3,6 +3,9 @@ use byteorder::{BigEndian, ByteOrder};
 use {ErrorKind, ProcedureId, Result};
 use traits::{BoxDecoder, Encodable, Encode};
 
+// TODO: 最上位ビットが1なら応答メッセージ、とする
+pub type MessageSeqNo = u32; // TODO: u64
+
 #[derive(Debug)]
 pub enum Message {
     Request(RequestMesasge),

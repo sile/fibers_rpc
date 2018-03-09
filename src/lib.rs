@@ -16,7 +16,11 @@ pub mod traits;
 mod channel;
 mod error;
 pub mod frame; // TODO
+pub mod frame_stream; // TODO
 mod message;
+pub mod message_stream; // TODO
+pub mod server_side_channel; // TODO
+pub mod server_side_handlers;
 
 /// This crate specific `Result` type.
 pub type Result<T> = std::result::Result<T, Error>;

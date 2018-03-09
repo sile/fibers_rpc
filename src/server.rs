@@ -157,28 +157,31 @@ impl RpcServerBuilder {
         self
     }
 
-    pub fn finish<S>(self, spawner: S) -> RpcServer
+    pub fn finish<S>(self, spawner: S) -> RpcServer<S>
     where
-        S: Spawn + Send + 'static,
+        S: Clone + Spawn + Send + 'static,
     {
         let logger = self.logger.new(o!("server" => self.bind_addr.to_string()));
         info!(logger, "Starts RPC server");
         RpcServer {
             listener: Listener::Binding(TcpListener::bind(self.bind_addr)),
             logger,
-            spawner: spawner.boxed(),
+            spawner,
             frame_handler: FrameHandler::new(self.handlers),
         }
     }
 }
 
-pub struct RpcServer {
+pub struct RpcServer<S> {
     listener: Listener,
     logger: Logger,
-    spawner: BoxSpawn,
+    spawner: S,
     frame_handler: FrameHandler,
 }
-impl Future for RpcServer {
+impl<S> Future for RpcServer<S>
+where
+    S: Clone + Spawn + Send + 'static,
+{
     type Item = ();
     type Error = Error;
 
@@ -190,11 +193,12 @@ impl Future for RpcServer {
 
                 let exit_logger = logger.clone();
                 let frame_handler = self.frame_handler.clone();
+                let spawner = self.spawner.clone().boxed();
                 self.spawner.spawn(
                     client
                         .map_err(|e| track!(Error::from(e)))
                         .and_then(move |stream| {
-                            TcpStreamHandler::new(logger, stream, frame_handler)
+                            TcpStreamHandler::new(logger, spawner, stream, frame_handler)
                         })
                         .then(move |result| {
                             if let Err(e) = result {
@@ -240,7 +244,7 @@ impl Clone for FrameHandler {
 }
 impl HandleFrame for FrameHandler {
     type Future = ::traits::Response;
-    fn handle_frame(&mut self, frame: &Frame) -> Result<Option<Self::Future>> {
+    fn handle_frame(&mut self, frame: Frame) -> Result<Option<Self::Future>> {
         track_assert!(!frame.is_error(), ErrorKind::Other, "TODO");
 
         let mut offset = 0;
@@ -259,7 +263,7 @@ impl HandleFrame for FrameHandler {
             .remove(&frame.seqno)
             .expect("Never fails");
         track!(handler.deserialize(&frame.data[offset..]))?; // TODO: handle error
-        if frame.is_eof() {
+        if frame.is_end_of_message() {
             let future = track!(handler.finish())?;
             Ok(Some(future))
         } else {
@@ -269,13 +273,20 @@ impl HandleFrame for FrameHandler {
 }
 
 struct TcpStreamHandler {
+    spawner: BoxSpawn,
     channel: RpcChannel<FrameHandler>,
     channel_handle: RpcChannelHandle,
 }
 impl TcpStreamHandler {
-    fn new(logger: Logger, stream: TcpStream, frame_handler: FrameHandler) -> Self {
+    fn new(
+        logger: Logger,
+        spawner: BoxSpawn,
+        stream: TcpStream,
+        frame_handler: FrameHandler,
+    ) -> Self {
         let (channel, channel_handle) = RpcChannel::with_stream(logger, stream, frame_handler);
         TcpStreamHandler {
+            spawner,
             channel,
             channel_handle,
         }
@@ -286,8 +297,19 @@ impl Future for TcpStreamHandler {
     type Error = Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        while let Async::Ready(_todo) = track!(self.channel.poll())? {
-            // TODO: spawn future
+        while let Async::Ready(reply) = track!(self.channel.poll())? {
+            if let Some(reply) = reply {
+                // TODO: reply.is_lazy()
+                let handle = self.channel_handle.clone();
+                self.spawner.spawn(reply.map(move |response| {
+                    if let Some(response) = response {
+                        handle.reply(response);
+                    }
+                    ()
+                }))
+            } else {
+                return Ok(Async::Ready(()));
+            }
         }
         Ok(Async::NotReady)
     }

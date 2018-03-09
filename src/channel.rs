@@ -12,7 +12,7 @@ use slog::Logger;
 use trackable::error::ErrorKindExt;
 
 use {Error, ErrorKind, Result};
-use frame::{DummyFrameHandler, Frame, FrameBuf, HandleFrame};
+use frame::{DummyFrameHandler, FrameBuf, HandleFrame, FLAG_ERROR};
 use message::Message;
 
 // TODO: parameter
@@ -87,7 +87,7 @@ impl<H: HandleFrame> Stream for RpcChannel<H> {
         while track!(self.connection.poll())?.is_ready() {
             self.connection.recv_frame(&mut self.read_frame);
             if let Some(frame) = self.read_frame.next_frame() {
-                if let Some(future) = track!(self.frame_handler.handle_frame(&frame))? {
+                if let Some(future) = track!(self.frame_handler.handle_frame(frame))? {
                     return Ok(Async::Ready(Some(future)));
                 }
             }
@@ -125,6 +125,11 @@ impl RpcChannelHandle {
     pub fn send_message(&self, message: Message) {
         let _ = self.outgoing_message_tx.send(message); // TODO: metrics
     }
+
+    // TODO:
+    pub fn reply(&self, message: ::traits::Encodable) {
+        unimplemented!()
+    }
 }
 
 #[derive(Debug)]
@@ -155,7 +160,7 @@ impl SendingMessage {
         let buf = &mut frame.buffer[frame.start..];
 
         BigEndian::write_u32(&mut buf[0..], self.seqno);
-        buf[4] = Frame::FLAG_ERROR;
+        buf[4] = FLAG_ERROR;
         BigEndian::write_u16(&mut buf[5..], 0);
 
         frame.end += FrameBuf::HEADER_SIZE;
@@ -307,3 +312,46 @@ enum ConnectionState {
     Connecting(Connect),
     Connected(TcpStream),
 }
+
+// #[derive(Debug)]
+// struct KeepAlive {
+//     future: Timeout,
+//     timeout: Duration,
+//     extend_period: bool,
+// }
+// impl KeepAlive {
+//     fn new(options: &ChannelOptions) -> Self {
+//         KeepAlive {
+//             future: timer::timeout(options.keep_alive_timeout),
+//             timeout: options.keep_alive_timeout,
+//             extend_period: false,
+//         }
+//     }
+
+//     fn extend_period(&mut self) {
+//         self.extend_period = true;
+//     }
+
+//     fn poll_timeout(&mut self) -> Result<bool> {
+//         let result = self.future
+//             .poll()
+//             .map_err(|_| ErrorKind::Other.cause("Broken timer"));
+//         Ok(track!(result)?.is_ready())
+//     }
+// }
+// impl Future for KeepAlive {
+//     type Item = ();
+//     type Error = Error;
+
+//     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+//         while track!(self.poll_timeout())? {
+//             if self.extend_period {
+//                 self.future = timer::timeout(self.timeout);
+//                 self.extend_period = false;
+//             } else {
+//                 return Ok(Async::Ready(()));
+//             }
+//         }
+//         Ok(Async::NotReady)
+//     }
+// }

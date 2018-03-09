@@ -13,7 +13,7 @@ use fibers::{Executor, InPlaceExecutor, Spawn};
 use fibers_rpc::ProcedureId;
 use fibers_rpc::client::RpcClientServiceBuilder;
 use fibers_rpc::server::RpcServerBuilder;
-use fibers_rpc::traits::{Call, Cast, HandleCall, HandleCast};
+use fibers_rpc::traits::{Call, Cast, Encode, HandleCall, HandleCast, Reply};
 use futures::Future;
 use sloggers::Build;
 use sloggers::terminal::TerminalLoggerBuilder;
@@ -53,9 +53,9 @@ impl HandleCall<EchoRpc> for EchoHandler {
     fn handle_call(
         &self,
         request: <EchoRpc as Call>::Request,
-    ) -> fibers_rpc::traits::Reply<<EchoRpc as Call>::Response> {
+    ) -> Reply<<EchoRpc as Call>::Response> {
         println!("# Request: {:?}", request);
-        unimplemented!()
+        Reply::new(Cursor::new(request).into_encodable())
     }
 }
 

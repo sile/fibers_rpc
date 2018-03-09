@@ -1,6 +1,6 @@
 use std::fmt;
 use std::io::{Cursor, Read};
-use futures::{Future, Poll};
+use futures::{Async, Future, Poll};
 
 use {Error, ProcedureId, Result};
 
@@ -19,9 +19,12 @@ pub enum Response {
 }
 impl Future for Response {
     type Item = Option<Encodable>;
-    type Error = Error;
+    type Error = ();
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        unimplemented!()
+        match *self {
+            Response::NoReply(ref mut f) => f.poll().map(|item| item.map(|_| None)),
+            Response::Reply(ref mut f) => f.poll().map(|item| item.map(Some)),
+        }
     }
 }
 
@@ -38,22 +41,54 @@ impl Future for NoReply {
 
 // TODO:
 #[derive(Debug)]
-pub struct BoxReply;
-
-#[derive(Debug)]
-pub struct Reply<T>(T);
-impl<T> Reply<T> {
-    pub fn boxed(self) -> BoxReply {
-        BoxReply
-    }
-}
-impl<T> Future for Reply<T> {
-    type Item = T;
+pub struct BoxReply(Option<Encodable>);
+impl Future for BoxReply {
+    type Item = Encodable;
     type Error = ();
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        unimplemented!()
+        let data = self.0.take().expect("Cannot poll BoxReply twice");
+        Ok(Async::Ready(data))
     }
 }
+
+// TODO: where T:Call
+#[derive(Debug)]
+pub struct Reply<T> {
+    // TODO
+    data: Encodable,
+    _t: ::std::marker::PhantomData<T>,
+}
+impl<T> Reply<T> {
+    // TODO: support future
+    pub fn new(data: Encodable) -> Self {
+        Reply {
+            data,
+            _t: ::std::marker::PhantomData,
+        }
+    }
+    pub fn boxed(self) -> BoxReply {
+        BoxReply(Some(self.data))
+    }
+}
+
+// // TODO: where T:Call
+// #[derive(Debug)]
+// pub struct Reply<T>(T);
+// impl<T> Reply<T> {
+//     pub fn new(data: T) -> Self {
+//         Reply(data)
+//     }
+//     pub fn boxed(self) -> BoxReply {
+//         BoxReply
+//     }
+// }
+// impl<T> Future for Reply<T> {
+//     type Item = T;
+//     type Error = ();
+//     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+//         unimplemented!()
+//     }
+// }
 
 pub trait Call {
     const PROCEDURE: ProcedureId;
@@ -104,7 +139,6 @@ impl<T> fmt::Debug for BoxDecoder<T> {
 }
 
 pub trait Encode<T> {
-    // Ok(0) = eos
     fn encode(&mut self, buf: &mut [u8]) -> Result<usize>;
 
     fn into_encodable(mut self) -> Encodable
