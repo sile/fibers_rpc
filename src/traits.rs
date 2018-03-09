@@ -90,7 +90,7 @@ impl<T> Reply<T> {
 //     }
 // }
 
-pub trait Call {
+pub trait Call: Send + Sync + 'static {
     const PROCEDURE: ProcedureId;
     type Request;
     type Response: Send + 'static;
@@ -101,12 +101,16 @@ pub trait Call {
     type ResponseDecoder: Decode<Self::Response> + Send + 'static;
 }
 
-pub trait Cast {
+pub trait Cast: Sync + Send + 'static {
     const PROCEDURE: ProcedureId;
     type Notification;
 
     type Encoder: Encode<Self::Notification> + Send + 'static;
     type Decoder: Decode<Self::Notification> + Send + 'static;
+}
+
+pub trait DecoderFactory<D>: Send + Sync + 'static {
+    fn create_decoder(&self) -> D;
 }
 
 pub trait Decode<T> {
