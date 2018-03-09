@@ -209,3 +209,16 @@ impl Decode<Vec<u8>> for Vec<u8> {
         Ok(::std::mem::replace(self, Vec::new()))
     }
 }
+
+#[derive(Debug)]
+pub struct BytesEncoder<T>(Cursor<T>);
+impl<T: AsRef<[u8]>> From<T> for BytesEncoder<T> {
+    fn from(f: T) -> Self {
+        BytesEncoder(Cursor::new(f))
+    }
+}
+impl<T: AsRef<[u8]>> Encode<T> for BytesEncoder<T> {
+    fn encode(&mut self, buf: &mut [u8]) -> Result<usize> {
+        track!(self.0.read(buf).map_err(Error::from))
+    }
+}

@@ -13,7 +13,8 @@ use fibers::{Executor, InPlaceExecutor, Spawn};
 use fibers_rpc::ProcedureId;
 use fibers_rpc::client::RpcClientServiceBuilder;
 use fibers_rpc::server::RpcServerBuilder;
-use fibers_rpc::traits::{Call, Cast, Encode, HandleCall, HandleCast, Reply};
+use fibers_rpc::server_side_handlers::{NoReply, Reply};
+use fibers_rpc::traits::{BytesEncoder, Call, Cast, HandleCall, HandleCast};
 use futures::Future;
 use sloggers::Build;
 use sloggers::terminal::TerminalLoggerBuilder;
@@ -34,19 +35,16 @@ impl Call for EchoRpc {
     type RequestDecoder = Vec<u8>;
 
     type Response = Vec<u8>;
-    type ResponseEncoder = Cursor<Vec<u8>>;
+    type ResponseEncoder = BytesEncoder<Vec<u8>>;
     type ResponseDecoder = Vec<u8>;
 }
 
 #[derive(Clone)]
 struct EchoHandler;
 impl HandleCast<EchoRpc> for EchoHandler {
-    fn handle_cast(
-        &self,
-        notification: <EchoRpc as Cast>::Notification,
-    ) -> fibers_rpc::traits::NoReply {
+    fn handle_cast(&self, notification: <EchoRpc as Cast>::Notification) -> NoReply {
         println!("# RECV: {:?}", notification);
-        fibers_rpc::traits::NoReply
+        NoReply::done()
     }
 }
 impl HandleCall<EchoRpc> for EchoHandler {
@@ -55,7 +53,8 @@ impl HandleCall<EchoRpc> for EchoHandler {
         request: <EchoRpc as Call>::Request,
     ) -> Reply<<EchoRpc as Call>::Response> {
         println!("# Request: {:?}", request);
-        Reply::new(Cursor::new(request).into_encodable())
+        unimplemented!();
+        // Reply::done(request)
     }
 }
 
@@ -97,7 +96,7 @@ fn main() {
     if let Some(_matches) = matches.subcommand_matches("server") {
         let server = RpcServerBuilder::new(addr)
             .logger(logger)
-            .register_cast_handler(EchoHandler)
+            .cast_handler(EchoHandler)
             .call_handler(EchoHandler)
             .finish(executor.handle());
         let fiber = executor.spawn_monitor(server);
