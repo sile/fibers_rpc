@@ -4,6 +4,7 @@ use {ErrorKind, ProcedureId, Result};
 use traits::{BoxDecoder, Encodable, Encode};
 
 // TODO: 最上位ビットが1なら応答メッセージ、とする
+// TODO: rename to `MessageId`
 pub type MessageSeqNo = u32; // TODO: u64
 
 #[derive(Debug)]

@@ -10,7 +10,7 @@ extern crate trackable;
 pub use error::{Error, ErrorKind};
 
 pub mod client;
-pub mod server;
+//pub mod server;
 pub mod traits;
 
 mod channel;

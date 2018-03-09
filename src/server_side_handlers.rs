@@ -3,18 +3,139 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use byteorder::{BigEndian, ByteOrder};
+use futures::{Async, Future, Poll};
+use futures::future::Either;
 
 use {ErrorKind, ProcedureId, Result};
 use frame::{Frame, HandleFrame};
 use message::MessageSeqNo;
-use traits::{Call, Cast, Decode, DecoderFactory, HandleCall, HandleCast};
+use traits::{Call, Cast, Decode, DecoderFactory, Encodable, Encode, EncoderFactory, HandleCall,
+             HandleCast};
 
 pub type MessageHandlers = HashMap<ProcedureId, Box<MessageHandlerFactory>>;
 
 #[derive(Debug)]
 pub enum Action {
-    Reply,
-    NoReply,
+    Reply(Reply<Encodable>),
+    NoReply(NoReply),
+}
+impl Action {
+    pub fn is_done(&self) -> bool {
+        match *self {
+            Action::Reply(ref x) => x.is_done(),
+            Action::NoReply(ref x) => x.future.is_none(),
+        }
+    }
+}
+impl Future for Action {
+    type Item = Option<(MessageSeqNo, Encodable)>;
+    type Error = ();
+
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        Ok(match *self {
+            Action::Reply(ref mut f) => f.poll()?.map(Some),
+            Action::NoReply(ref mut f) => f.poll()?.map(|_| None),
+        })
+    }
+}
+
+pub struct Reply<T> {
+    seqno: MessageSeqNo,
+    either: Either<Box<Future<Item = T, Error = ()> + Send + 'static>, Option<T>>,
+}
+impl<T> Reply<T> {
+    pub fn done(response: T) -> Self {
+        Reply {
+            seqno: 0,
+            either: Either::B(Some(response)),
+        }
+    }
+    pub fn future<F>(future: F) -> Self
+    where
+        F: Future<Item = T, Error = ()> + Send + 'static,
+    {
+        Reply {
+            seqno: 0,
+            either: Either::A(Box::new(future)),
+        }
+    }
+
+    fn is_done(&self) -> bool {
+        if let Either::B(_) = self.either {
+            true
+        } else {
+            false
+        }
+    }
+    fn into_encodable<F>(self, f: F) -> Reply<Encodable>
+    where
+        F: FnOnce(T) -> Encodable + Send + 'static,
+        T: 'static,
+    {
+        match self.either {
+            Either::A(v) => Reply {
+                seqno: self.seqno,
+                either: Either::A(Box::new(v.map(f))),
+            },
+            Either::B(v) => Reply {
+                seqno: self.seqno,
+                either: Either::B(v.map(f)),
+            },
+        }
+    }
+}
+impl<T> Future for Reply<T> {
+    type Item = (MessageSeqNo, T);
+    type Error = ();
+
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        let seqno = self.seqno;
+        Ok(match self.either {
+            Either::A(ref mut f) => f.poll()?.map(|v| (seqno, v)),
+            Either::B(ref mut v) => {
+                Async::Ready((seqno, v.take().expect("Cannot poll Reply twice")))
+            }
+        })
+    }
+}
+impl<T> fmt::Debug for Reply<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Reply {{ seqno: {}, .. }}", self.seqno)
+    }
+}
+
+pub struct NoReply {
+    future: Option<Box<Future<Item = (), Error = ()> + Send + 'static>>,
+}
+impl NoReply {
+    pub fn done() -> Self {
+        NoReply { future: None }
+    }
+    pub fn future<F>(f: F) -> Self
+    where
+        F: Future<Item = (), Error = ()> + Send + 'static,
+    {
+        NoReply {
+            future: Some(Box::new(f)),
+        }
+    }
+}
+impl Future for NoReply {
+    type Item = ();
+    type Error = (); // TODO: Never
+
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        self.future.poll().map(|x| x.map(|_| ()))
+    }
+}
+impl fmt::Debug for NoReply {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if self.future.is_none() {
+            write!(f, "NoReply {{ future: None }}")
+        } else {
+            write!(f, "NoReply {{ future: Some(_) }}")
+        }
+    }
 }
 
 pub struct IncomingFramesHandler {
@@ -99,6 +220,20 @@ pub struct CastHandlerFactory<T, H, D> {
     handler: Arc<H>,
     decoder_factory: D,
 }
+impl<T, H, D> CastHandlerFactory<T, H, D>
+where
+    T: Cast,
+    H: HandleCast<T>,
+    D: DecoderFactory<T::Decoder>,
+{
+    pub fn new(handler: H, decoder_factory: D) -> Self {
+        CastHandlerFactory {
+            _rpc: PhantomData,
+            handler: Arc::new(handler),
+            decoder_factory,
+        }
+    }
+}
 impl<T, H, D> MessageHandlerFactory for CastHandlerFactory<T, H, D>
 where
     T: Cast,
@@ -131,21 +266,39 @@ where
     }
     fn finish(&mut self) -> Result<Action> {
         let notification = track!(self.decoder.finish())?;
-        let _noreply = self.handler.handle_cast(notification);
-        Ok(Action::NoReply)
+        let noreply = self.handler.handle_cast(notification);
+        Ok(Action::NoReply(noreply))
     }
 }
 
-pub struct CallHandlerFactory<T, H, D> {
+pub struct CallHandlerFactory<T, H, D, E> {
     _rpc: PhantomData<T>,
     handler: Arc<H>,
     decoder_factory: D,
+    encoder_factory: Arc<E>,
 }
-impl<T, H, D> MessageHandlerFactory for CallHandlerFactory<T, H, D>
+impl<T, H, D, E> CallHandlerFactory<T, H, D, E>
 where
     T: Call,
     H: HandleCall<T>,
     D: DecoderFactory<T::RequestDecoder>,
+    E: EncoderFactory<T::ResponseEncoder>,
+{
+    pub fn new(handler: H, decoder_factory: D, encoder_factory: E) -> Self {
+        CallHandlerFactory {
+            _rpc: PhantomData,
+            handler: Arc::new(handler),
+            decoder_factory,
+            encoder_factory: Arc::new(encoder_factory),
+        }
+    }
+}
+impl<T, H, D, E> MessageHandlerFactory for CallHandlerFactory<T, H, D, E>
+where
+    T: Call,
+    H: HandleCall<T>,
+    D: DecoderFactory<T::RequestDecoder>,
+    E: EncoderFactory<T::ResponseEncoder>,
 {
     fn create_message_handler(&self, seqno: MessageSeqNo) -> Box<HandleMessage> {
         let decoder = self.decoder_factory.create_decoder();
@@ -153,29 +306,37 @@ where
             _rpc: PhantomData,
             handler: Arc::clone(&self.handler),
             decoder,
+            encoder_factory: Arc::clone(&self.encoder_factory),
             seqno,
         };
         Box::new(handler)
     }
 }
 
-struct CallHandler<T, H, D> {
+struct CallHandler<T, H, D, E> {
     _rpc: PhantomData<T>,
     handler: Arc<H>,
     decoder: D,
+    encoder_factory: Arc<E>,
     seqno: MessageSeqNo,
 }
-impl<T, H> HandleMessage for CallHandler<T, H, T::RequestDecoder>
+impl<T, H, E> HandleMessage for CallHandler<T, H, T::RequestDecoder, E>
 where
     T: Call,
     H: HandleCall<T>,
+    E: EncoderFactory<T::ResponseEncoder>,
 {
     fn handle_message(&mut self, data: &[u8]) -> Result<()> {
         track!(self.decoder.decode(data))
     }
     fn finish(&mut self) -> Result<Action> {
         let request = track!(self.decoder.finish())?;
-        let _reply = self.handler.handle_call(request);
-        Ok(Action::Reply)
+        let mut reply = self.handler.handle_call(request);
+        reply.seqno = self.seqno;
+
+        let encoder_factory = Arc::clone(&self.encoder_factory);
+        Ok(Action::Reply(reply.into_encodable(move |v| {
+            encoder_factory.create_encoder(v).into_encodable()
+        })))
     }
 }

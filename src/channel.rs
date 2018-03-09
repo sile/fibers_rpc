@@ -46,28 +46,6 @@ impl RpcChannel<DummyFrameHandler> {
         (channel, handle)
     }
 }
-impl<H: HandleFrame> RpcChannel<H> {
-    pub fn with_stream(
-        logger: Logger,
-        stream: TcpStream,
-        frame_handler: H,
-    ) -> (Self, RpcChannelHandle) {
-        let (outgoing_message_tx, outgoing_message_rx) = mpsc::channel();
-        let channel = RpcChannel {
-            connection: Connection::with_stream(logger, stream),
-            outgoing_message_rx,
-            sending_messages: VecDeque::new(),
-            next_message_seqno: 0,
-            frame: FrameBuf::new(),
-            read_frame: FrameBuf::new(),
-            frame_handler,
-        };
-        let handle = RpcChannelHandle {
-            outgoing_message_tx,
-        };
-        (channel, handle)
-    }
-}
 impl<H: HandleFrame> Stream for RpcChannel<H> {
     type Item = H::Future;
     type Error = Error;
@@ -125,11 +103,6 @@ impl RpcChannelHandle {
     pub fn send_message(&self, message: Message) {
         let _ = self.outgoing_message_tx.send(message); // TODO: metrics
     }
-
-    // TODO:
-    pub fn reply(&self, message: ::traits::Encodable) {
-        unimplemented!()
-    }
 }
 
 #[derive(Debug)]
@@ -175,17 +148,6 @@ struct Connection {
     state: ConnectionState,
 }
 impl Connection {
-    fn with_stream(logger: Logger, stream: TcpStream) -> Self {
-        unsafe {
-            let _ = stream.with_inner(|s| s.set_nodelay(false));
-        }
-        let state = ConnectionState::Connected(stream);
-        Connection {
-            logger,
-            peer: None,
-            state,
-        }
-    }
     fn new(logger: Logger, peer: SocketAddr) -> Self {
         let state = ConnectionState::Wait(timer::timeout(Duration::default()));
         Connection {

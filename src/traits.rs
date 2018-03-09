@@ -5,11 +5,11 @@ use futures::{Async, Future, Poll};
 use {Error, ProcedureId, Result};
 
 pub trait HandleCast<T: Cast>: Send + Sync + 'static {
-    fn handle_cast(&self, notification: T::Notification) -> NoReply;
+    fn handle_cast(&self, notification: T::Notification) -> ::server_side_handlers::NoReply;
 }
 
 pub trait HandleCall<T: Call>: Send + Sync + 'static {
-    fn handle_call(&self, request: T::Request) -> Reply<T::Response>;
+    fn handle_call(&self, request: T::Request) -> ::server_side_handlers::Reply<T::Response>;
 }
 
 #[derive(Debug)]
@@ -71,25 +71,6 @@ impl<T> Reply<T> {
     }
 }
 
-// // TODO: where T:Call
-// #[derive(Debug)]
-// pub struct Reply<T>(T);
-// impl<T> Reply<T> {
-//     pub fn new(data: T) -> Self {
-//         Reply(data)
-//     }
-//     pub fn boxed(self) -> BoxReply {
-//         BoxReply
-//     }
-// }
-// impl<T> Future for Reply<T> {
-//     type Item = T;
-//     type Error = ();
-//     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-//         unimplemented!()
-//     }
-// }
-
 pub trait Call: Send + Sync + 'static {
     const PROCEDURE: ProcedureId;
     type Request;
@@ -140,6 +121,12 @@ impl<T> fmt::Debug for BoxDecoder<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "BoxDecoder(_)")
     }
+}
+
+pub trait EncoderFactory<E>: Send + Sync + 'static {
+    fn create_encoder<T>(&self, value: T) -> E
+    where
+        E: Encode<T>;
 }
 
 pub trait Encode<T> {

@@ -13,6 +13,9 @@ pub struct FrameStream {
 }
 impl FrameStream {
     pub fn new(transport_stream: TcpStream) -> Self {
+        unsafe {
+            let _ = transport_stream.with_inner(|s| s.set_nodelay(true));
+        }
         FrameStream {
             transport_stream,
             send_buf: FrameSendBuf::new(),
