@@ -36,6 +36,11 @@ impl<H: HandleFrame> MessageStream<H> {
         seqno
     }
 
+    pub fn reply_message(&mut self, seqno: MessageSeqNo, message: Encodable) {
+        let seqno = (1 << 31) | seqno; // TODO:
+        self.outgoing_messages.push_back((seqno, message));
+    }
+
     pub fn incoming_frame_handler_mut(&mut self) -> &mut H {
         &mut self.incoming_frame_handler
     }

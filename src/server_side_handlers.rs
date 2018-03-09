@@ -19,14 +19,6 @@ pub enum Action {
     Reply(Reply<Encodable>),
     NoReply(NoReply),
 }
-impl Action {
-    pub fn is_done(&self) -> bool {
-        match *self {
-            Action::Reply(ref x) => x.is_done(),
-            Action::NoReply(ref x) => x.future.is_none(),
-        }
-    }
-}
 impl Future for Action {
     type Item = Option<(MessageSeqNo, Encodable)>;
     type Error = ();
@@ -60,11 +52,12 @@ impl<T> Reply<T> {
         }
     }
 
-    fn is_done(&self) -> bool {
-        if let Either::B(_) = self.either {
-            true
+    pub fn try_take(&mut self) -> Option<(MessageSeqNo, T)> {
+        let seqno = self.seqno;
+        if let Either::B(ref mut v) = self.either {
+            v.take().map(|v| (seqno, v))
         } else {
-            false
+            None
         }
     }
     fn into_encodable<F>(self, f: F) -> Reply<Encodable>
@@ -119,6 +112,9 @@ impl NoReply {
             future: Some(Box::new(f)),
         }
     }
+    pub fn is_done(&self) -> bool {
+        self.future.is_none()
+    }
 }
 impl Future for NoReply {
     type Item = ();
@@ -138,13 +134,13 @@ impl fmt::Debug for NoReply {
     }
 }
 
-pub struct IncomingFramesHandler {
+pub struct IncomingFrameHandler {
     handlers: Arc<MessageHandlers>,
     runnings: HashMap<MessageSeqNo, Box<HandleMessage>>,
 }
-impl IncomingFramesHandler {
+impl IncomingFrameHandler {
     pub fn new(handlers: MessageHandlers) -> Self {
-        IncomingFramesHandler {
+        IncomingFrameHandler {
             handlers: Arc::new(handlers),
             runnings: HashMap::new(),
         }
@@ -154,7 +150,7 @@ impl IncomingFramesHandler {
         self.runnings.remove(&seqno);
     }
 }
-impl HandleFrame for IncomingFramesHandler {
+impl HandleFrame for IncomingFrameHandler {
     type Future = Action;
 
     fn handle_frame(&mut self, frame: Frame) -> Result<Option<Self::Future>> {
@@ -187,19 +183,19 @@ impl HandleFrame for IncomingFramesHandler {
         }
     }
 }
-impl fmt::Debug for IncomingFramesHandler {
+impl fmt::Debug for IncomingFrameHandler {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "IncomingFramesHandler {{ handlers.len: {}, runnings.len: {} }}",
+            "IncomingFrameHandler {{ handlers.len: {}, runnings.len: {} }}",
             self.handlers.len(),
             self.runnings.len()
         )
     }
 }
-impl Clone for IncomingFramesHandler {
+impl Clone for IncomingFrameHandler {
     fn clone(&self) -> Self {
-        IncomingFramesHandler {
+        IncomingFrameHandler {
             handlers: Arc::clone(&self.handlers),
             runnings: HashMap::new(),
         }
@@ -282,7 +278,7 @@ where
     T: Call,
     H: HandleCall<T>,
     D: DecoderFactory<T::RequestDecoder>,
-    E: EncoderFactory<T::ResponseEncoder>,
+    E: EncoderFactory<T::Response, T::ResponseEncoder>,
 {
     pub fn new(handler: H, decoder_factory: D, encoder_factory: E) -> Self {
         CallHandlerFactory {
@@ -298,7 +294,7 @@ where
     T: Call,
     H: HandleCall<T>,
     D: DecoderFactory<T::RequestDecoder>,
-    E: EncoderFactory<T::ResponseEncoder>,
+    E: EncoderFactory<T::Response, T::ResponseEncoder>,
 {
     fn create_message_handler(&self, seqno: MessageSeqNo) -> Box<HandleMessage> {
         let decoder = self.decoder_factory.create_decoder();
@@ -324,7 +320,7 @@ impl<T, H, E> HandleMessage for CallHandler<T, H, T::RequestDecoder, E>
 where
     T: Call,
     H: HandleCall<T>,
-    E: EncoderFactory<T::ResponseEncoder>,
+    E: EncoderFactory<T::Response, T::ResponseEncoder>,
 {
     fn handle_message(&mut self, data: &[u8]) -> Result<()> {
         track!(self.decoder.decode(data))

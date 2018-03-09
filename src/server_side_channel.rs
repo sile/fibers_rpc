@@ -4,21 +4,18 @@ use slog::Logger;
 
 use Error;
 use frame_stream::FrameStream;
+use message::MessageSeqNo;
 use message_stream::{MessageStream, MessageStreamEvent};
-use server_side_handlers::{Action, IncomingFramesHandler};
+use server_side_handlers::{Action, IncomingFrameHandler};
 use traits::Encodable;
 
 #[derive(Debug)]
 pub struct ServerSideChannel {
     logger: Logger,
-    message_stream: MessageStream<IncomingFramesHandler>,
+    message_stream: MessageStream<IncomingFrameHandler>,
 }
 impl ServerSideChannel {
-    pub fn new(
-        logger: Logger,
-        transport_stream: TcpStream,
-        handler: IncomingFramesHandler,
-    ) -> Self {
+    pub fn new(logger: Logger, transport_stream: TcpStream, handler: IncomingFrameHandler) -> Self {
         let message_stream = MessageStream::new(FrameStream::new(transport_stream), handler);
         ServerSideChannel {
             logger,
@@ -27,6 +24,9 @@ impl ServerSideChannel {
     }
     pub fn send_message(&mut self, message: Encodable) {
         self.message_stream.send_message(message);
+    }
+    pub fn reply(&mut self, seqno: MessageSeqNo, message: Encodable) {
+        self.message_stream.reply_message(seqno, message);
     }
 }
 impl Stream for ServerSideChannel {

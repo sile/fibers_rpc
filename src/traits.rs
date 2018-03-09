@@ -1,5 +1,6 @@
 use std::fmt;
 use std::io::{Cursor, Read};
+use std::marker::PhantomData;
 use futures::{Async, Future, Poll};
 
 use {Error, ProcedureId, Result};
@@ -94,6 +95,21 @@ pub trait DecoderFactory<D>: Send + Sync + 'static {
     fn create_decoder(&self) -> D;
 }
 
+#[derive(Debug)]
+pub struct DefaultDecoderFactory<D>(PhantomData<D>);
+impl<D> DefaultDecoderFactory<D> {
+    pub fn new() -> Self {
+        DefaultDecoderFactory(PhantomData)
+    }
+}
+unsafe impl<D> Sync for DefaultDecoderFactory<D> {}
+unsafe impl<D> Send for DefaultDecoderFactory<D> {}
+impl<D: Default + 'static> DecoderFactory<D> for DefaultDecoderFactory<D> {
+    fn create_decoder(&self) -> D {
+        D::default()
+    }
+}
+
 pub trait Decode<T> {
     fn decode(&mut self, buf: &[u8]) -> Result<()>;
     fn finish(&mut self) -> Result<T>;
@@ -123,10 +139,30 @@ impl<T> fmt::Debug for BoxDecoder<T> {
     }
 }
 
-pub trait EncoderFactory<E>: Send + Sync + 'static {
-    fn create_encoder<T>(&self, value: T) -> E
-    where
-        E: Encode<T>;
+pub trait EncoderFactory<T, E>: Send + Sync + 'static
+where
+    E: Encode<T>,
+{
+    fn create_encoder(&self, value: T) -> E;
+}
+
+#[derive(Debug)]
+pub struct IntoEncoderFactory<T, E>(PhantomData<(T, E)>);
+impl<T, E> IntoEncoderFactory<T, E> {
+    pub fn new() -> Self {
+        IntoEncoderFactory(PhantomData)
+    }
+}
+unsafe impl<T, E> Sync for IntoEncoderFactory<T, E> {}
+unsafe impl<T, E> Send for IntoEncoderFactory<T, E> {}
+impl<T, E> EncoderFactory<T, E> for IntoEncoderFactory<T, E>
+where
+    E: Encode<T> + 'static,
+    T: Into<E> + 'static,
+{
+    fn create_encoder(&self, value: T) -> E {
+        value.into()
+    }
 }
 
 pub trait Encode<T> {
