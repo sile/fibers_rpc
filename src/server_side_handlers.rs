@@ -6,11 +6,11 @@ use byteorder::{BigEndian, ByteOrder};
 use futures::{Async, Future, Poll};
 use futures::future::Either;
 
-use {Error, ErrorKind, ProcedureId, Result};
+use {Call, Cast, Error, ErrorKind, ProcedureId, Result};
 use codec::{Decode, MakeDecoder, MakeEncoder};
 use frame::{Frame, HandleFrame};
-use message::MessageSeqNo;
-use traits::{Call, Cast, Encodable, HandleCall, HandleCast};
+use message::{Encodable, MessageSeqNo};
+use server::{HandleCall, HandleCast};
 
 pub type MessageHandlers = HashMap<ProcedureId, Box<MessageHandlerFactory>>;
 
@@ -156,13 +156,13 @@ impl HandleFrame for IncomingFrameHandler {
         let mut offset = 0;
         if !self.runnings.contains_key(&frame.seqno) {
             debug_assert!(frame.data.len() >= 4);
-            let procedure = BigEndian::read_u32(&frame.data);
+            let procedure = ProcedureId(BigEndian::read_u32(&frame.data));
             offset = 4;
 
             let factory = track_assert_some!(
                 self.handlers.get(&procedure),
                 ErrorKind::InvalidInput,
-                "Unregistered RPC: {}",
+                "Unregistered RPC: {:?}",
                 procedure
             );
             let handler = factory.create_message_handler(frame.seqno);

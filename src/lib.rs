@@ -13,7 +13,6 @@ pub use error::{Error, ErrorKind};
 pub use server::{RpcServer, RpcServerBuilder};
 
 pub mod codec;
-pub mod traits;
 
 mod client;
 mod client_service;
@@ -31,4 +30,57 @@ mod server_side_handlers;
 /// This crate specific `Result` type.
 pub type Result<T> = std::result::Result<T, Error>;
 
-pub type ProcedureId = u32;
+/// The identifier of a procedure.
+///
+/// This must be unique among procedures registered in an RPC server.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ProcedureId(pub u32);
+
+/// Request/response RPC.
+pub trait Call: Send + Sync + 'static {
+    /// The identifier of the procedure.
+    const ID: ProcedureId;
+
+    /// The name of the procedure.
+    ///
+    /// This is only used for debugging purpose.
+    const NAME: &'static str;
+
+    /// Request message.
+    type Request;
+
+    /// Request message encoder.
+    type RequestEncoder: codec::Encode<Self::Request> + Send + 'static;
+
+    /// Request message decoder.
+    type RequestDecoder: codec::Decode<Self::Request> + Send + 'static;
+
+    /// Response message.
+    type Response: Send + 'static;
+
+    /// Response message encoder.
+    type ResponseEncoder: codec::Encode<Self::Response> + Send + 'static;
+
+    /// Response message decoder.
+    type ResponseDecoder: codec::Decode<Self::Response> + Send + 'static;
+}
+
+/// Notification RPC.
+pub trait Cast: Sync + Send + 'static {
+    /// The identifier of the procedure.
+    const ID: ProcedureId;
+
+    /// The name of the procedure.
+    ///
+    /// This is only used for debugging purpose.
+    const NAME: &'static str;
+
+    /// Notification message.
+    type Notification;
+
+    /// Notification message encoder.
+    type Encoder: codec::Encode<Self::Notification> + Send + 'static;
+
+    /// Notification message decoder.
+    type Decoder: codec::Decode<Self::Notification> + Send + 'static;
+}

@@ -13,9 +13,8 @@ use {Error, ErrorKind, Result};
 use client_side_handlers::{BoxResponseHandler, IncomingFrameHandler};
 use frame::HandleFrame;
 use frame_stream::FrameStream;
-use message::MessageSeqNo;
+use message::{Encodable, MessageSeqNo};
 use message_stream::{MessageStream, MessageStreamEvent};
-use traits::Encodable;
 
 #[derive(Debug)]
 pub struct ClientSideChannel {

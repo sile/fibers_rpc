@@ -5,10 +5,9 @@ use slog::Logger;
 use Error;
 use frame::HandleFrame;
 use frame_stream::FrameStream;
-use message::MessageSeqNo;
+use message::{Encodable, MessageSeqNo};
 use message_stream::{MessageStream, MessageStreamEvent};
 use server_side_handlers::{Action, IncomingFrameHandler};
-use traits::Encodable;
 
 #[derive(Debug)]
 pub struct ServerSideChannel {

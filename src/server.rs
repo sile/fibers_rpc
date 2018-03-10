@@ -8,13 +8,20 @@ use fibers::net::streams::Incoming;
 use fibers::sync::mpsc;
 use futures::{Async, Future, Poll, Stream};
 
-use Error;
+use {Call, Cast, Error};
 use codec::{DefaultDecoderMaker, IntoEncoderMaker};
-use message::MessageSeqNo;
+use message::{Encodable, MessageSeqNo};
 use server_side_channel::ServerSideChannel;
 use server_side_handlers::{Action, CallHandlerFactory, CastHandlerFactory, IncomingFrameHandler,
                            MessageHandlers};
-use traits::{Call, Cast, Encodable, HandleCall, HandleCast};
+
+pub trait HandleCast<T: Cast>: Send + Sync + 'static {
+    fn handle_cast(&self, notification: T::Notification) -> ::server_side_handlers::NoReply;
+}
+
+pub trait HandleCall<T: Call>: Send + Sync + 'static {
+    fn handle_call(&self, request: T::Request) -> ::server_side_handlers::Reply<T::Response>;
+}
 
 pub struct RpcServerBuilder {
     bind_addr: SocketAddr,
@@ -39,11 +46,11 @@ impl RpcServerBuilder {
         T::RequestDecoder: Default,
         T::Response: Into<T::ResponseEncoder>,
     {
-        assert!(!self.handlers.contains_key(&T::PROCEDURE));
+        assert!(!self.handlers.contains_key(&T::ID));
 
         let handler =
             CallHandlerFactory::new(handler, DefaultDecoderMaker::new(), IntoEncoderMaker::new());
-        self.handlers.insert(T::PROCEDURE, Box::new(handler));
+        self.handlers.insert(T::ID, Box::new(handler));
         self
     }
 
@@ -51,10 +58,10 @@ impl RpcServerBuilder {
     where
         T::Decoder: Default,
     {
-        assert!(!self.handlers.contains_key(&T::PROCEDURE));
+        assert!(!self.handlers.contains_key(&T::ID));
 
         let handler = CastHandlerFactory::new(handler, DefaultDecoderMaker::new());
-        self.handlers.insert(T::PROCEDURE, Box::new(handler));
+        self.handlers.insert(T::ID, Box::new(handler));
         self
     }
 

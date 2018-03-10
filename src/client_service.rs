@@ -12,7 +12,7 @@ use Error;
 use client::RpcClient;
 use client_side_channel::ClientSideChannel;
 use client_side_handlers::BoxResponseHandler;
-use traits::Encodable;
+use message::Encodable;
 
 #[derive(Debug)]
 pub struct RpcClientServiceBuilder {

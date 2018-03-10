@@ -5,8 +5,7 @@ use trackable::error::ErrorKindExt;
 use {Error, ErrorKind, Result};
 use frame::HandleFrame;
 use frame_stream::FrameStream;
-use message::MessageSeqNo;
-use traits::Encodable;
+use message::{Encodable, MessageSeqNo};
 
 #[derive(Debug)]
 pub struct MessageStream<H: HandleFrame> {
