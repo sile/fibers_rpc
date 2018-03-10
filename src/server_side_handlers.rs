@@ -7,10 +7,10 @@ use futures::{Async, Future, Poll};
 use futures::future::Either;
 
 use {Error, ErrorKind, ProcedureId, Result};
+use codec::{Decode, MakeDecoder, MakeEncoder};
 use frame::{Frame, HandleFrame};
 use message::MessageSeqNo;
-use traits::{Call, Cast, Decode, DecoderFactory, Encodable, Encode, EncoderFactory, HandleCall,
-             HandleCast};
+use traits::{Call, Cast, Encodable, HandleCall, HandleCast};
 
 pub type MessageHandlers = HashMap<ProcedureId, Box<MessageHandlerFactory>>;
 
@@ -215,19 +215,19 @@ pub trait HandleMessage: Send + 'static {
 pub struct CastHandlerFactory<T, H, D> {
     _rpc: PhantomData<T>,
     handler: Arc<H>,
-    decoder_factory: D,
+    decoder_maker: D,
 }
 impl<T, H, D> CastHandlerFactory<T, H, D>
 where
     T: Cast,
     H: HandleCast<T>,
-    D: DecoderFactory<T::Decoder>,
+    D: MakeDecoder<T::Decoder>,
 {
-    pub fn new(handler: H, decoder_factory: D) -> Self {
+    pub fn new(handler: H, decoder_maker: D) -> Self {
         CastHandlerFactory {
             _rpc: PhantomData,
             handler: Arc::new(handler),
-            decoder_factory,
+            decoder_maker,
         }
     }
 }
@@ -235,10 +235,10 @@ impl<T, H, D> MessageHandlerFactory for CastHandlerFactory<T, H, D>
 where
     T: Cast,
     H: HandleCast<T>,
-    D: DecoderFactory<T::Decoder>,
+    D: MakeDecoder<T::Decoder>,
 {
     fn create_message_handler(&self, _seqno: MessageSeqNo) -> Box<HandleMessage> {
-        let decoder = self.decoder_factory.create_decoder();
+        let decoder = self.decoder_maker.make_decoder();
         let handler = CastHandler {
             _rpc: PhantomData,
             handler: Arc::clone(&self.handler),
@@ -271,22 +271,22 @@ where
 pub struct CallHandlerFactory<T, H, D, E> {
     _rpc: PhantomData<T>,
     handler: Arc<H>,
-    decoder_factory: D,
-    encoder_factory: Arc<E>,
+    decoder_maker: D,
+    encoder_maker: Arc<E>,
 }
 impl<T, H, D, E> CallHandlerFactory<T, H, D, E>
 where
     T: Call,
     H: HandleCall<T>,
-    D: DecoderFactory<T::RequestDecoder>,
-    E: EncoderFactory<T::Response, T::ResponseEncoder>,
+    D: MakeDecoder<T::RequestDecoder>,
+    E: MakeEncoder<T::Response, T::ResponseEncoder>,
 {
-    pub fn new(handler: H, decoder_factory: D, encoder_factory: E) -> Self {
+    pub fn new(handler: H, decoder_maker: D, encoder_maker: E) -> Self {
         CallHandlerFactory {
             _rpc: PhantomData,
             handler: Arc::new(handler),
-            decoder_factory,
-            encoder_factory: Arc::new(encoder_factory),
+            decoder_maker,
+            encoder_maker: Arc::new(encoder_maker),
         }
     }
 }
@@ -294,16 +294,16 @@ impl<T, H, D, E> MessageHandlerFactory for CallHandlerFactory<T, H, D, E>
 where
     T: Call,
     H: HandleCall<T>,
-    D: DecoderFactory<T::RequestDecoder>,
-    E: EncoderFactory<T::Response, T::ResponseEncoder>,
+    D: MakeDecoder<T::RequestDecoder>,
+    E: MakeEncoder<T::Response, T::ResponseEncoder>,
 {
     fn create_message_handler(&self, seqno: MessageSeqNo) -> Box<HandleMessage> {
-        let decoder = self.decoder_factory.create_decoder();
+        let decoder = self.decoder_maker.make_decoder();
         let handler = CallHandler {
             _rpc: PhantomData,
             handler: Arc::clone(&self.handler),
             decoder,
-            encoder_factory: Arc::clone(&self.encoder_factory),
+            encoder_maker: Arc::clone(&self.encoder_maker),
             seqno,
         };
         Box::new(handler)
@@ -314,14 +314,14 @@ struct CallHandler<T, H, D, E> {
     _rpc: PhantomData<T>,
     handler: Arc<H>,
     decoder: D,
-    encoder_factory: Arc<E>,
+    encoder_maker: Arc<E>,
     seqno: MessageSeqNo,
 }
 impl<T, H, E> HandleMessage for CallHandler<T, H, T::RequestDecoder, E>
 where
     T: Call,
     H: HandleCall<T>,
-    E: EncoderFactory<T::Response, T::ResponseEncoder>,
+    E: MakeEncoder<T::Response, T::ResponseEncoder>,
 {
     fn handle_message(&mut self, data: &[u8]) -> Result<()> {
         track!(self.decoder.decode(data))
@@ -331,9 +331,9 @@ where
         let mut reply = self.handler.handle_call(request);
         reply.seqno = self.seqno;
 
-        let encoder_factory = Arc::clone(&self.encoder_factory);
+        let encoder_maker = Arc::clone(&self.encoder_maker);
         Ok(Action::Reply(reply.into_encodable(move |v| {
-            encoder_factory.create_encoder(v).into_encodable()
+            Encodable::new(encoder_maker.make_encoder(v))
         })))
     }
 }

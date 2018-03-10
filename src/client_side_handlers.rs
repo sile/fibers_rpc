@@ -3,9 +3,9 @@ use std::fmt;
 use fibers::sync::oneshot;
 
 use {Error, Result};
+use codec::Decode;
 use frame::{Frame, HandleFrame};
 use message::MessageSeqNo;
-use traits::Decode;
 
 pub struct IncomingFrameHandler {
     handlers: HashMap<MessageSeqNo, BoxResponseHandler>,

@@ -9,12 +9,12 @@ use fibers::sync::mpsc;
 use futures::{Async, Future, Poll, Stream};
 
 use Error;
+use codec::{DefaultDecoderMaker, IntoEncoderMaker};
 use message::MessageSeqNo;
 use server_side_channel::ServerSideChannel;
 use server_side_handlers::{Action, CallHandlerFactory, CastHandlerFactory, IncomingFrameHandler,
                            MessageHandlers};
-use traits::{Call, Cast, DefaultDecoderFactory, Encodable, HandleCall, HandleCast,
-             IntoEncoderFactory};
+use traits::{Call, Cast, Encodable, HandleCall, HandleCast};
 
 pub struct RpcServerBuilder {
     bind_addr: SocketAddr,
@@ -41,11 +41,8 @@ impl RpcServerBuilder {
     {
         assert!(!self.handlers.contains_key(&T::PROCEDURE));
 
-        let handler = CallHandlerFactory::new(
-            handler,
-            DefaultDecoderFactory::new(),
-            IntoEncoderFactory::new(),
-        );
+        let handler =
+            CallHandlerFactory::new(handler, DefaultDecoderMaker::new(), IntoEncoderMaker::new());
         self.handlers.insert(T::PROCEDURE, Box::new(handler));
         self
     }
@@ -56,7 +53,7 @@ impl RpcServerBuilder {
     {
         assert!(!self.handlers.contains_key(&T::PROCEDURE));
 
-        let handler = CastHandlerFactory::new(handler, DefaultDecoderFactory::new());
+        let handler = CastHandlerFactory::new(handler, DefaultDecoderMaker::new());
         self.handlers.insert(T::PROCEDURE, Box::new(handler));
         self
     }

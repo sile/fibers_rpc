@@ -54,9 +54,8 @@ impl FrameRecvBuf {
         if self.write_start < frame_end {
             if self.buf.len() < frame_end {
                 let remaining_len = self.write_start - header_start;
-                for i in 0..remaining_len {
-                    self.buf[i] = self.buf[header_start + i];
-                }
+                let (left, right) = self.buf.split_at_mut(header_start);
+                (&mut left[..remaining_len]).copy_from_slice(&right[..remaining_len]);
                 self.read_start = 0;
                 self.write_start = remaining_len;
             }
@@ -169,55 +168,10 @@ impl<'a> FrameMut<'a> {
     }
 }
 
-// | msg_seqno:32 | flags:8 | frame_len:16 | frame_data:* |
-#[derive(Debug)]
-pub struct FrameBuf {
-    pub buffer: Vec<u8>,
-    pub start: usize,
-    pub end: usize,
-}
-impl FrameBuf {
-    pub const HEADER_SIZE: usize = 4 + 1 + 2;
-    pub const MAX_SIZE: usize = Self::HEADER_SIZE + Self::MAX_DATA_SIZE;
-    pub const MAX_DATA_SIZE: usize = 0xFFFF;
-
-    pub fn new() -> Self {
-        FrameBuf {
-            buffer: vec![0; Self::MAX_SIZE * 2],
-            start: 0,
-            end: 0,
-        }
-    }
-    pub fn next_frame(&mut self) -> Option<Frame> {
-        unimplemented!()
-    }
-    pub fn is_empty(&self) -> bool {
-        self.start == self.end
-    }
-    pub fn is_full(&self) -> bool {
-        self.end == Self::MAX_SIZE
-    }
-    pub fn has_space(&self) -> bool {
-        self.end <= Self::MAX_SIZE
-    }
-    pub fn as_bytes(&self) -> &[u8] {
-        &self.buffer[self.start..self.end]
-    }
-}
-
 pub trait HandleFrame {
     // TODO: rename
     type Future;
 
     fn handle_frame(&mut self, frame: Frame) -> Result<Option<Self::Future>>;
     fn handle_error(&mut self, _seqno: MessageSeqNo, _error: Error) {}
-}
-
-#[derive(Debug)]
-pub struct DummyFrameHandler;
-impl HandleFrame for DummyFrameHandler {
-    type Future = ();
-    fn handle_frame(&mut self, _frame: Frame) -> Result<Option<Self::Future>> {
-        panic!()
-    }
 }
