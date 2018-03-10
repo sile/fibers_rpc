@@ -14,6 +14,8 @@ pub mod server;
 pub mod traits;
 
 mod channel;
+pub mod client_side_channel; // TODO:
+pub mod client_side_handlers; // TODO
 mod error;
 pub mod frame; // TODO
 pub mod frame_stream; // TODO

@@ -14,6 +14,7 @@ impl From<std::io::Error> for Error {
 #[allow(missing_docs)]
 pub enum ErrorKind {
     InvalidInput,
+    Unavailable,
     Other,
 }
 impl TrackableErrorKind for ErrorKind {}

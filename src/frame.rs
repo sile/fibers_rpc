@@ -1,6 +1,7 @@
 use byteorder::{BigEndian, ByteOrder};
 
-use Result;
+use {Error, Result};
+use message::MessageSeqNo;
 
 const MAX_FRAME_SIZE: usize = FRAME_HEADER_SIZE + MAX_FRAME_DATA_SIZE;
 const FRAME_HEADER_SIZE: usize = 4 + 1 + 2;
@@ -209,6 +210,7 @@ pub trait HandleFrame {
     type Future;
 
     fn handle_frame(&mut self, frame: Frame) -> Result<Option<Self::Future>>;
+    fn handle_error(&mut self, _seqno: MessageSeqNo, _error: Error) {}
 }
 
 #[derive(Debug)]

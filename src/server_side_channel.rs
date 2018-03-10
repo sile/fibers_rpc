@@ -3,6 +3,7 @@ use futures::{Async, Poll, Stream};
 use slog::Logger;
 
 use Error;
+use frame::HandleFrame;
 use frame_stream::FrameStream;
 use message::MessageSeqNo;
 use message_stream::{MessageStream, MessageStreamEvent};
@@ -22,11 +23,9 @@ impl ServerSideChannel {
             message_stream,
         }
     }
-    pub fn send_message(&mut self, message: Encodable) {
-        self.message_stream.send_message(message);
-    }
     pub fn reply(&mut self, seqno: MessageSeqNo, message: Encodable) {
-        self.message_stream.reply_message(seqno, message);
+        let seqno = (1 << 31) | seqno; // TODO:
+        self.message_stream.send_message(seqno, message);
     }
 }
 impl Stream for ServerSideChannel {
@@ -49,7 +48,7 @@ impl Stream for ServerSideChannel {
                             debug!(self.logger, "Failed to receive message({}): {}", seqno, e);
                             self.message_stream
                                 .incoming_frame_handler_mut()
-                                .handle_error(seqno);
+                                .handle_error(seqno, e);
                         }
                         Ok(action) => {
                             debug!(self.logger, "Completed to receive message({})", seqno);

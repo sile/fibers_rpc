@@ -15,7 +15,6 @@ pub struct MessageStream<H: HandleFrame> {
     incoming_frame_handler: H,
     cancelled_incoming_messages: HashSet<MessageSeqNo>,
     event_queue: VecDeque<MessageStreamEvent<H::Future>>,
-    next_seqno: MessageSeqNo,
 }
 impl<H: HandleFrame> MessageStream<H> {
     pub fn new(frame_stream: FrameStream, incoming_frame_handler: H) -> Self {
@@ -25,19 +24,10 @@ impl<H: HandleFrame> MessageStream<H> {
             incoming_frame_handler,
             cancelled_incoming_messages: HashSet::new(),
             event_queue: VecDeque::new(),
-            next_seqno: 0,
         }
     }
 
-    pub fn send_message(&mut self, message: Encodable) -> MessageSeqNo {
-        let seqno = self.next_seqno;
-        self.outgoing_messages.push_back((seqno, message));
-        self.next_seqno += 1;
-        seqno
-    }
-
-    pub fn reply_message(&mut self, seqno: MessageSeqNo, message: Encodable) {
-        let seqno = (1 << 31) | seqno; // TODO:
+    pub fn send_message(&mut self, seqno: MessageSeqNo, message: Encodable) {
         self.outgoing_messages.push_back((seqno, message));
     }
 
@@ -139,4 +129,12 @@ pub enum MessageStreamEvent<T> {
         seqno: MessageSeqNo,
         result: Result<T>,
     },
+}
+impl<T> MessageStreamEvent<T> {
+    pub fn is_ok(&self) -> bool {
+        match *self {
+            MessageStreamEvent::Sent { ref result, .. } => result.is_ok(),
+            MessageStreamEvent::Received { ref result, .. } => result.is_ok(),
+        }
+    }
 }

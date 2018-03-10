@@ -6,7 +6,7 @@ use byteorder::{BigEndian, ByteOrder};
 use futures::{Async, Future, Poll};
 use futures::future::Either;
 
-use {ErrorKind, ProcedureId, Result};
+use {Error, ErrorKind, ProcedureId, Result};
 use frame::{Frame, HandleFrame};
 use message::MessageSeqNo;
 use traits::{Call, Cast, Decode, DecoderFactory, Encodable, Encode, EncoderFactory, HandleCall,
@@ -139,15 +139,12 @@ pub struct IncomingFrameHandler {
     runnings: HashMap<MessageSeqNo, Box<HandleMessage>>,
 }
 impl IncomingFrameHandler {
-    pub fn new(handlers: MessageHandlers) -> Self {
+    pub fn new(mut handlers: MessageHandlers) -> Self {
+        handlers.shrink_to_fit();
         IncomingFrameHandler {
             handlers: Arc::new(handlers),
             runnings: HashMap::new(),
         }
-    }
-
-    pub fn handle_error(&mut self, seqno: MessageSeqNo) {
-        self.runnings.remove(&seqno);
     }
 }
 impl HandleFrame for IncomingFrameHandler {
@@ -181,6 +178,10 @@ impl HandleFrame for IncomingFrameHandler {
             self.runnings.insert(frame.seqno, handler);
             Ok(None)
         }
+    }
+
+    fn handle_error(&mut self, seqno: MessageSeqNo, _error: Error) {
+        self.runnings.remove(&seqno);
     }
 }
 impl fmt::Debug for IncomingFrameHandler {
