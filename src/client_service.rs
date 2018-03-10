@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use slog::{Discard, Logger};
@@ -8,9 +9,10 @@ use fibers::sync::mpsc;
 use futures::{Async, Future, Poll, Stream};
 
 use Error;
-use channel::{RpcChannel, RpcChannelHandle};
-use message::Message;
-use super::RpcClient;
+use client::RpcClient;
+use client_side_channel::ClientSideChannel;
+use client_side_handlers::BoxResponseHandler;
+use traits::Encodable;
 
 #[derive(Debug)]
 pub struct RpcClientServiceBuilder {
@@ -69,19 +71,17 @@ impl RpcClientService {
                         info!(logger, "New client-side RPC channel is created");
                         let command_tx = self.command_tx.clone();
                         let mut channels = channels.clone();
-                        let (channel, handle) =
-                            RpcChannel::<::frame::DummyFrameHandler>::new(logger.clone(), server);
-                        self.spawner
-                            .spawn(channel.for_each(|m| Ok(())).then(move |result| {
-                                if let Err(e) = result {
-                                    error!(logger, "A client-side RPC channel aborted: {}", e);
-                                } else {
-                                    info!(logger, "A client-side RPC channel was closed");
-                                }
-                                let command = Command::RemoveChannel { server };
-                                let _ = command_tx.send(command);
-                                Ok(())
-                            }));;
+                        let (channel, handle) = RpcChannel::new(logger.clone(), server);
+                        self.spawner.spawn(channel.then(move |result| {
+                            if let Err(e) = result {
+                                error!(logger, "A client-side RPC channel aborted: {}", e);
+                            } else {
+                                info!(logger, "A client-side RPC channel was closed");
+                            }
+                            let command = Command::RemoveChannel { server };
+                            let _ = command_tx.send(command);
+                            Ok(())
+                        }));;
                         channels.insert(server, handle);
                         channels
                     });
@@ -142,4 +142,58 @@ enum Command {
     RemoveChannel {
         server: SocketAddr,
     },
+}
+
+#[derive(Debug)]
+struct RpcChannel {
+    inner: ClientSideChannel,
+    message_rx: mpsc::Receiver<Message>,
+}
+impl RpcChannel {
+    fn new(logger: Logger, server: SocketAddr) -> (Self, RpcChannelHandle) {
+        let (message_tx, message_rx) = mpsc::channel();
+        let inner = ClientSideChannel::new(logger, server);
+        let channel = RpcChannel { inner, message_rx };
+        let handle = RpcChannelHandle { message_tx };
+        (channel, handle)
+    }
+}
+impl Future for RpcChannel {
+    type Item = ();
+    type Error = Error;
+
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        while let Async::Ready(message) = self.message_rx.poll().expect("Never fails") {
+            if let Some(m) = message {
+                if m.force_wakeup {
+                    self.inner.force_wakeup();
+                }
+                self.inner.send_message(m.message, m.response_handler);
+            } else {
+                return Ok(Async::Ready(()));
+            }
+        }
+        track!(self.inner.poll())
+    }
+}
+
+#[derive(Debug, Clone)]
+struct RpcChannelHandle {
+    message_tx: mpsc::Sender<Message>,
+}
+impl RpcChannelHandle {
+    pub fn send_message(&self, message: Message) {
+        let _ = self.message_tx.send(message);
+    }
+}
+
+pub struct Message {
+    pub message: Encodable,
+    pub response_handler: Option<BoxResponseHandler>,
+    pub force_wakeup: bool,
+}
+impl fmt::Debug for Message {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Message {{ .. }}")
+    }
 }

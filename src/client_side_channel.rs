@@ -10,12 +10,12 @@ use slog::Logger;
 use trackable::error::ErrorKindExt;
 
 use {Error, ErrorKind, Result};
-use client_side_handlers::{BoxResponseHandler, IncomingFrameHandler, ResponseHandler};
+use client_side_handlers::{BoxResponseHandler, IncomingFrameHandler};
 use frame::HandleFrame;
 use frame_stream::FrameStream;
 use message::MessageSeqNo;
 use message_stream::{MessageStream, MessageStreamEvent};
-use traits::{Decode, Encodable};
+use traits::Encodable;
 
 #[derive(Debug)]
 pub struct ClientSideChannel {
@@ -38,20 +38,13 @@ impl ClientSideChannel {
         }
     }
 
-    pub fn cast(&mut self, notification: Encodable) {
+    pub fn send_message(
+        &mut self,
+        message: Encodable,
+        response_handler: Option<BoxResponseHandler>,
+    ) {
         self.message_stream
-            .send_message(self.next_seqno, notification, None);
-        self.next_seqno += 1;
-    }
-
-    pub fn call<T, D>(&mut self, request: Encodable, response_handler: ResponseHandler<T, D>)
-    where
-        T: Send + 'static,
-        D: Send + Decode<T> + 'static,
-    {
-        let handler = Box::new(response_handler);
-        self.message_stream
-            .send_message(self.next_seqno, request, Some(handler));
+            .send_message(self.next_seqno, message, response_handler);
         self.next_seqno += 1;
     }
 
