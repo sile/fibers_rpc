@@ -10,7 +10,7 @@ use {Call, Cast, Error, ErrorKind, ProcedureId, Result};
 use codec::{Decode, MakeDecoder, MakeEncoder};
 use frame::{Frame, HandleFrame};
 use message::{Encodable, MessageSeqNo};
-use server::{HandleCall, HandleCast};
+use rpc_server::{HandleCall, HandleCast};
 
 pub type MessageHandlers = HashMap<ProcedureId, Box<MessageHandlerFactory>>;
 

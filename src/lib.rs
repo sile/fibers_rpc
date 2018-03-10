@@ -7,14 +7,22 @@ extern crate slog;
 #[macro_use]
 extern crate trackable;
 
-pub use client::RpcClient;
-pub use client_service::{RpcClientService, RpcClientServiceBuilder};
 pub use error::{Error, ErrorKind};
-pub use server::{RpcServer, RpcServerBuilder};
 
 pub mod codec;
+pub mod client {
+    //! RPC client.
 
-mod client;
+    pub use client_service::{RpcClientService, RpcClientServiceBuilder};
+    pub use rpc_client::RpcClient;
+}
+pub mod server {
+    //! RPC server.
+
+    pub use rpc_server::{HandleCall, HandleCast, RpcServer, RpcServerBuilder};
+    pub use server_side_handlers::{NoReply, Reply};
+}
+
 mod client_service;
 mod client_side_channel;
 mod client_side_handlers;
@@ -23,7 +31,8 @@ mod frame;
 mod frame_stream;
 mod message;
 mod message_stream;
-mod server;
+mod rpc_client;
+mod rpc_server;
 mod server_side_channel;
 mod server_side_handlers;
 

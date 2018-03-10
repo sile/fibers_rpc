@@ -9,10 +9,10 @@ use fibers::sync::mpsc;
 use futures::{Async, Future, Poll, Stream};
 
 use Error;
-use client::RpcClient;
 use client_side_channel::ClientSideChannel;
 use client_side_handlers::BoxResponseHandler;
 use message::Encodable;
+use rpc_client::RpcClient;
 
 #[derive(Debug)]
 pub struct RpcClientServiceBuilder {
