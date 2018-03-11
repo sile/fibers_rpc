@@ -9,26 +9,20 @@ use fibers::sync::mpsc;
 use futures::{Async, Future, Poll, Stream};
 
 use {Call, Cast, Error};
-use codec::{DefaultDecoderMaker, IntoEncoderMaker};
+use codec::{DefaultDecoderMaker, IntoEncoderMaker, MakeDecoder, MakeEncoder};
 use message::{Encodable, MessageSeqNo};
 use server_side_channel::ServerSideChannel;
-use server_side_handlers::{Action, CallHandlerFactory, CastHandlerFactory, IncomingFrameHandler,
-                           MessageHandlers};
+use server_side_handlers::{Action, CallHandlerFactory, CastHandlerFactory, HandleCall, HandleCast,
+                           IncomingFrameHandler, MessageHandlers, Never, NoReply, Reply};
 
-pub trait HandleCast<T: Cast>: Send + Sync + 'static {
-    fn handle_cast(&self, notification: T::Notification) -> ::server_side_handlers::NoReply;
-}
-
-pub trait HandleCall<T: Call>: Send + Sync + 'static {
-    fn handle_call(&self, request: T::Request) -> ::server_side_handlers::Reply<T::Response>;
-}
-
+/// RPC server builder.
 pub struct RpcServerBuilder {
     bind_addr: SocketAddr,
     logger: Logger,
     handlers: MessageHandlers,
 }
 impl RpcServerBuilder {
+    /// Makes a new `RpcServerBuilder` instance.
     pub fn new(bind_addr: SocketAddr) -> Self {
         RpcServerBuilder {
             bind_addr,
@@ -36,35 +30,97 @@ impl RpcServerBuilder {
             handlers: HashMap::new(),
         }
     }
+
+    /// Sets the logger of the server.
+    ///
+    /// The default value is `Logger::root(Discard, o!())`.
     pub fn logger(mut self, logger: Logger) -> Self {
         self.logger = logger;
         self
     }
 
-    pub fn call_handler<T: Call, H: HandleCall<T>>(mut self, handler: H) -> Self
+    /// Registers a handler for the request/response RPC.
+    ///
+    /// This equivalent to
+    /// `call_handler_with_codec(handler, DefaultDecoderMaker::new(), IntoEncoderMaker::new())`.
+    ///
+    /// # Panices
+    ///
+    /// If a procedure which has `T::ID` already have been registered, the calling thread will panic.
+    pub fn call_handler<T, H>(self, handler: H) -> Self
     where
+        T: Call,
+        H: HandleCall<T>,
         T::RequestDecoder: Default,
         T::Response: Into<T::ResponseEncoder>,
     {
-        assert!(!self.handlers.contains_key(&T::ID));
+        self.call_handler_with_codec(handler, DefaultDecoderMaker::new(), IntoEncoderMaker::new())
+    }
 
-        let handler =
-            CallHandlerFactory::new(handler, DefaultDecoderMaker::new(), IntoEncoderMaker::new());
+    /// Registers a handler (with the given decoder/encoder makers) for the request/response RPC.
+    ///
+    /// # Panices
+    ///
+    /// If a procedure which has `T::ID` already have been registered, the calling thread will panic.
+    pub fn call_handler_with_codec<T, H, D, E>(mut self, handler: H, decoder: D, encoder: E) -> Self
+    where
+        T: Call,
+        H: HandleCall<T>,
+        D: MakeDecoder<T::RequestDecoder>,
+        E: MakeEncoder<T::Response, T::ResponseEncoder>,
+    {
+        assert!(
+            !self.handlers.contains_key(&T::ID),
+            "RPC registration conflicts: procedure={:?}, name={:?}",
+            T::ID,
+            T::NAME
+        );
+
+        let handler = CallHandlerFactory::new(handler, decoder, encoder);
         self.handlers.insert(T::ID, Box::new(handler));
         self
     }
 
-    pub fn cast_handler<T: Cast, H: HandleCast<T>>(mut self, handler: H) -> Self
+    /// Registers a handler for the notification RPC.
+    ///
+    /// This equivalent to `cast_handler_with_codec(handler, DefaultDecoderMaker::new())`.
+    ///
+    /// # Panices
+    ///
+    /// If a procedure which has `T::ID` already have been registered, the calling thread will panic.
+    pub fn cast_handler<T, H>(self, handler: H) -> Self
     where
+        T: Cast,
+        H: HandleCast<T>,
         T::Decoder: Default,
     {
-        assert!(!self.handlers.contains_key(&T::ID));
+        self.cast_handler_with_codec(handler, DefaultDecoderMaker::new())
+    }
 
-        let handler = CastHandlerFactory::new(handler, DefaultDecoderMaker::new());
+    /// Registers a handler (with the given decoder maker) for the notification RPC.
+    ///
+    /// # Panices
+    ///
+    /// If a procedure which has `T::ID` already have been registered, the calling thread will panic.
+    pub fn cast_handler_with_codec<T, H, D>(mut self, handler: H, decoder: D) -> Self
+    where
+        T: Cast,
+        H: HandleCast<T>,
+        D: MakeDecoder<T::Decoder>,
+    {
+        assert!(
+            !self.handlers.contains_key(&T::ID),
+            "RPC registration conflicts: procedure={:?}, name={:?}",
+            T::ID,
+            T::NAME
+        );
+
+        let handler = CastHandlerFactory::new(handler, decoder);
         self.handlers.insert(T::ID, Box::new(handler));
         self
     }
 
+    /// Returns the resulting RPC server.
     pub fn finish<S>(self, spawner: S) -> RpcServer<S>
     where
         S: Clone + Spawn + Send + 'static,
@@ -80,6 +136,7 @@ impl RpcServerBuilder {
     }
 }
 
+/// RPC server.
 pub struct RpcServer<S> {
     listener: Listener,
     logger: Logger,
@@ -153,7 +210,7 @@ impl Future for ChannelHandler {
                 match action {
                     Action::NoReply(noreply) => {
                         if !noreply.is_done() {
-                            self.spawner.spawn(noreply);
+                            self.spawner.spawn(noreply.map_err(|_: Never| ()));
                         }
                     }
                     Action::Reply(mut reply) => {
@@ -164,7 +221,7 @@ impl Future for ChannelHandler {
                             let future = reply.map(move |(seqno, message)| {
                                 let _ = reply_tx.send((seqno, message));
                             });
-                            self.spawner.spawn(future);
+                            self.spawner.spawn(future.map_err(|_: Never| ()));
                         }
                     }
                 }
