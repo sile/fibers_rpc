@@ -10,49 +10,50 @@ use {Call, Cast, Error, ErrorKind, ProcedureId, Result};
 use codec::{Decode, MakeDecoder, MakeEncoder};
 use frame::{Frame, HandleFrame};
 use message::{Encodable, MessageSeqNo};
-use rpc_server::{HandleCall, HandleCast};
 
 pub type MessageHandlers = HashMap<ProcedureId, Box<MessageHandlerFactory>>;
 
-#[derive(Debug)]
-pub enum Action {
-    Reply(Reply<Encodable>),
-    NoReply(NoReply),
-}
-impl Future for Action {
-    type Item = Option<(MessageSeqNo, Encodable)>;
-    type Error = ();
-
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        Ok(match *self {
-            Action::Reply(ref mut f) => f.poll()?.map(Some),
-            Action::NoReply(ref mut f) => f.poll()?.map(|_| None),
-        })
-    }
+/// This trait allows for handling notification RPC.
+pub trait HandleCast<T: Cast>: Send + Sync + 'static {
+    /// Handles a notification.
+    fn handle_cast(&self, notification: T::Notification) -> NoReply;
 }
 
+/// This trait allows for handling request/response RPC.
+pub trait HandleCall<T: Call>: Send + Sync + 'static {
+    /// Handles a request.
+    fn handle_call(&self, request: T::Request) -> Reply<T::Response>;
+}
+
+/// A marker which represents never instantiated type.
+pub struct Never(());
+
+/// `Future` that represents a reply from a RPC server.
 pub struct Reply<T> {
     seqno: MessageSeqNo,
-    either: Either<Box<Future<Item = T, Error = ()> + Send + 'static>, Option<T>>,
+    either: Either<Box<Future<Item = T, Error = Never> + Send + 'static>, Option<T>>,
 }
 impl<T> Reply<T> {
-    pub fn done(response: T) -> Self {
-        Reply {
-            seqno: 0,
-            either: Either::B(Some(response)),
-        }
-    }
+    /// Makes a `Reply` instance which will execute `future` then reply the resulting item as the response.
     pub fn future<F>(future: F) -> Self
     where
-        F: Future<Item = T, Error = ()> + Send + 'static,
+        F: Future<Item = T, Error = Never> + Send + 'static,
     {
         Reply {
-            seqno: 0,
+            seqno: 0, // dummy initial value
             either: Either::A(Box::new(future)),
         }
     }
 
-    pub fn try_take(&mut self) -> Option<(MessageSeqNo, T)> {
+    /// Makes a `Reply` instance which replies the response immediately.
+    pub fn done(response: T) -> Self {
+        Reply {
+            seqno: 0, // dummy initial value
+            either: Either::B(Some(response)),
+        }
+    }
+
+    pub(crate) fn try_take(&mut self) -> Option<(MessageSeqNo, T)> {
         let seqno = self.seqno;
         if let Either::B(ref mut v) = self.either {
             v.take().map(|v| (seqno, v))
@@ -60,6 +61,7 @@ impl<T> Reply<T> {
             None
         }
     }
+
     fn into_encodable<F>(self, f: F) -> Reply<Encodable>
     where
         F: FnOnce(T) -> Encodable + Send + 'static,
@@ -79,7 +81,7 @@ impl<T> Reply<T> {
 }
 impl<T> Future for Reply<T> {
     type Item = (MessageSeqNo, T);
-    type Error = ();
+    type Error = Never;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         let seqno = self.seqno;
@@ -97,28 +99,33 @@ impl<T> fmt::Debug for Reply<T> {
     }
 }
 
+/// `Future` that represents a task for handling an RPC notification.
 pub struct NoReply {
-    future: Option<Box<Future<Item = (), Error = ()> + Send + 'static>>,
+    future: Option<Box<Future<Item = (), Error = Never> + Send + 'static>>,
 }
 impl NoReply {
-    pub fn done() -> Self {
-        NoReply { future: None }
-    }
+    /// Makes a `NoReply` instance which will execute `future` for handling the notification.
     pub fn future<F>(f: F) -> Self
     where
-        F: Future<Item = (), Error = ()> + Send + 'static,
+        F: Future<Item = (), Error = Never> + Send + 'static,
     {
         NoReply {
             future: Some(Box::new(f)),
         }
     }
-    pub fn is_done(&self) -> bool {
+
+    /// Makes a `NoReply` instance which has no task.
+    pub fn done() -> Self {
+        NoReply { future: None }
+    }
+
+    pub(crate) fn is_done(&self) -> bool {
         self.future.is_none()
     }
 }
 impl Future for NoReply {
     type Item = ();
-    type Error = (); // TODO: Never
+    type Error = Never;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         self.future.poll().map(|x| x.map(|_| ()))
@@ -131,6 +138,23 @@ impl fmt::Debug for NoReply {
         } else {
             write!(f, "NoReply {{ future: Some(_) }}")
         }
+    }
+}
+
+#[derive(Debug)]
+pub enum Action {
+    Reply(Reply<Encodable>),
+    NoReply(NoReply),
+}
+impl Future for Action {
+    type Item = Option<(MessageSeqNo, Encodable)>;
+    type Error = Never;
+
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        Ok(match *self {
+            Action::Reply(ref mut f) => f.poll()?.map(Some),
+            Action::NoReply(ref mut f) => f.poll()?.map(|_| None),
+        })
     }
 }
 

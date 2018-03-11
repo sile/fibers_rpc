@@ -19,8 +19,8 @@ pub mod client {
 pub mod server {
     //! RPC server.
 
-    pub use rpc_server::{HandleCall, HandleCast, RpcServer, RpcServerBuilder};
-    pub use server_side_handlers::{NoReply, Reply};
+    pub use rpc_server::{RpcServer, RpcServerBuilder};
+    pub use server_side_handlers::{HandleCall, HandleCast, Never, NoReply, Reply};
 }
 
 mod client_service;
