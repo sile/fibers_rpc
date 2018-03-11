@@ -4,11 +4,17 @@ use std::io::{Cursor, Read};
 use std::marker::PhantomData;
 use std::mem;
 
-use {Error, Result};
+use {Error, ErrorKind, Result};
+
+/// The maximum size of encoding/decoding buffers.
+pub const MAX_BUFFER_SIZE: usize = 0xFFFF;
 
 /// This trait allows for incrementally decoding an RPC message from a sequence of bytes.
 pub trait Decode<T> {
     /// Proceeds decoding by consuming the given fragment of a byte sequence.
+    ///
+    /// The size of `buf` is `MAX_BUFFER_SIZE` or less than it.
+    /// The latter case indicates that the end of the byte sequence reached.
     fn decode(&mut self, buf: &[u8]) -> Result<()>;
 
     /// Finishes decoding and returns the resulting message.
@@ -24,17 +30,84 @@ impl Decode<Vec<u8>> for Vec<u8> {
     }
 }
 
+/// This trait represents decodable messages (i.e., can be decoded without the help of any special decoders).
+pub trait DecodeFrom: Sized {
+    /// Decodes a message from `buf`.
+    fn decode_from(buf: &[u8]) -> Result<Self>;
+}
+impl DecodeFrom for Vec<u8> {
+    fn decode_from(buf: &[u8]) -> Result<Self> {
+        Ok(buf.to_owned())
+    }
+}
+
+/// An implementation of `Decode` trait which decodes messages by using `T::DecodeFrom` function.
+#[derive(Debug)]
+pub struct SelfDecoder<T>(Option<T>);
+impl<T: DecodeFrom> Decode<T> for SelfDecoder<T> {
+    fn decode(&mut self, buf: &[u8]) -> Result<()> {
+        track_assert!(self.0.is_none(), ErrorKind::InvalidInput);
+        self.0 = Some(track!(T::decode_from(buf))?);
+        Ok(())
+    }
+    fn finish(&mut self) -> Result<T> {
+        Ok(track_assert_some!(self.0.take(), ErrorKind::InvalidInput))
+    }
+}
+impl<T> Default for SelfDecoder<T> {
+    fn default() -> Self {
+        SelfDecoder(None)
+    }
+}
+
 /// This trait allows for incrementally encoding an RPC message to a sequence of bytes.
 pub trait Encode<T> {
     /// Proceeds encoding by writing the part of the resulting byte sequence to the given buffer.
     ///
     /// It returns the size of the written bytes.
     /// If the size is less than `buf.len()`, it means the encoding process completed.
+    ///
+    /// The size of `buf` always is `MAX_BUFFER_SIZE`.
     fn encode(&mut self, buf: &mut [u8]) -> Result<usize>;
 }
 impl<T: AsRef<[u8]>> Encode<T> for Cursor<T> {
     fn encode(&mut self, buf: &mut [u8]) -> Result<usize> {
         track!(self.read(buf).map_err(Error::from))
+    }
+}
+
+/// This trait represents encodable messages (i.e., can be encoded without the help of any special encoders).
+pub trait EncodeTo {
+    /// Encodes a message to `buf`.
+    ///
+    /// Note that the size of `buf` always is `MAX_BUFFER_SIZE`.
+    /// If you would like to encode large messages, please use other means
+    /// (e.g., Implements `Encode` or `ToBytes` traits).
+    fn encode_to(&self, buf: &mut [u8]) -> Result<usize>;
+}
+impl EncodeTo for Vec<u8> {
+    fn encode_to(&self, buf: &mut [u8]) -> Result<usize> {
+        track_assert!(self.len() <= buf.len(), ErrorKind::InvalidInput);
+        (&mut buf[..self.len()]).copy_from_slice(self);
+        Ok(self.len())
+    }
+}
+
+/// An implementation of `Encode` trait which encodes messages by using `T::encode_to` method.
+#[derive(Debug)]
+pub struct SelfEncoder<T>(Option<T>);
+impl<T: EncodeTo> Encode<T> for SelfEncoder<T> {
+    fn encode(&mut self, buf: &mut [u8]) -> Result<usize> {
+        if let Some(t) = self.0.take() {
+            track!(t.encode_to(buf))
+        } else {
+            Ok(0)
+        }
+    }
+}
+impl<T> From<T> for SelfEncoder<T> {
+    fn from(f: T) -> Self {
+        SelfEncoder(Some(f))
     }
 }
 
