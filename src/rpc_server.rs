@@ -10,7 +10,7 @@ use futures::{Async, Future, Poll, Stream};
 
 use {Call, Cast, Error};
 use codec::{DefaultDecoderMaker, IntoEncoderMaker, MakeDecoder, MakeEncoder};
-use message::{Encodable, MessageSeqNo};
+use message::{MessageSeqNo, OutgoingMessage};
 use server_side_channel::ServerSideChannel;
 use server_side_handlers::{Action, CallHandlerFactory, CastHandlerFactory, HandleCall, HandleCast,
                            IncomingFrameHandler, MessageHandlers, Never};
@@ -186,8 +186,8 @@ where
 struct ChannelHandler {
     spawner: BoxSpawn,
     channel: ServerSideChannel,
-    reply_tx: mpsc::Sender<(MessageSeqNo, Encodable)>,
-    reply_rx: mpsc::Receiver<(MessageSeqNo, Encodable)>,
+    reply_tx: mpsc::Sender<(MessageSeqNo, OutgoingMessage)>,
+    reply_rx: mpsc::Receiver<(MessageSeqNo, OutgoingMessage)>,
 }
 impl ChannelHandler {
     fn new(spawner: BoxSpawn, channel: ServerSideChannel) -> Self {

@@ -13,7 +13,7 @@ use {Error, ErrorKind, Result};
 use client_side_handlers::{BoxResponseHandler, IncomingFrameHandler};
 use frame::HandleFrame;
 use frame_stream::FrameStream;
-use message::{Encodable, MessageSeqNo};
+use message::{MessageSeqNo, OutgoingMessage};
 use message_stream::{MessageStream, MessageStreamEvent};
 
 #[derive(Debug)]
@@ -39,7 +39,7 @@ impl ClientSideChannel {
 
     pub fn send_message(
         &mut self,
-        message: Encodable,
+        message: OutgoingMessage,
         response_handler: Option<BoxResponseHandler>,
     ) {
         let seqno = self.next_seqno.next();
@@ -212,7 +212,7 @@ impl MessageStreamState {
     fn send_message(
         &mut self,
         seqno: MessageSeqNo,
-        message: Encodable,
+        message: OutgoingMessage,
         handler: Option<BoxResponseHandler>,
     ) {
         match *self {
@@ -244,7 +244,7 @@ impl MessageStreamState {
 
 struct BufferedMessage {
     seqno: MessageSeqNo,
-    message: Encodable,
+    message: OutgoingMessage,
     handler: Option<BoxResponseHandler>,
 }
 impl fmt::Debug for BufferedMessage {

@@ -5,12 +5,12 @@ use trackable::error::ErrorKindExt;
 use {Error, ErrorKind, Result};
 use frame::HandleFrame;
 use frame_stream::FrameStream;
-use message::{Encodable, MessageSeqNo};
+use message::{MessageSeqNo, OutgoingMessage};
 
 #[derive(Debug)]
 pub struct MessageStream<H: HandleFrame> {
     frame_stream: FrameStream,
-    outgoing_messages: VecDeque<(MessageSeqNo, Encodable)>,
+    outgoing_messages: VecDeque<(MessageSeqNo, OutgoingMessage)>,
     incoming_frame_handler: H,
     cancelled_incoming_messages: HashSet<MessageSeqNo>,
     event_queue: VecDeque<MessageStreamEvent<H::Future>>,
@@ -26,7 +26,7 @@ impl<H: HandleFrame> MessageStream<H> {
         }
     }
 
-    pub fn send_message(&mut self, seqno: MessageSeqNo, message: Encodable) {
+    pub fn send_message(&mut self, seqno: MessageSeqNo, message: OutgoingMessage) {
         self.outgoing_messages.push_back((seqno, message));
     }
 

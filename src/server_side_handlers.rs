@@ -9,7 +9,7 @@ use futures::future::Either;
 use {Call, Cast, Error, ErrorKind, ProcedureId, Result};
 use codec::{Decode, MakeDecoder, MakeEncoder};
 use frame::{Frame, HandleFrame};
-use message::{Encodable, MessageSeqNo};
+use message::{MessageSeqNo, OutgoingMessage};
 
 pub type MessageHandlers = HashMap<ProcedureId, Box<MessageHandlerFactory>>;
 
@@ -62,9 +62,9 @@ impl<T> Reply<T> {
         }
     }
 
-    fn into_encodable<F>(self, f: F) -> Reply<Encodable>
+    fn into_encodable<F>(self, f: F) -> Reply<OutgoingMessage>
     where
-        F: FnOnce(T) -> Encodable + Send + 'static,
+        F: FnOnce(T) -> OutgoingMessage + Send + 'static,
         T: 'static,
     {
         match self.either {
@@ -143,11 +143,11 @@ impl fmt::Debug for NoReply {
 
 #[derive(Debug)]
 pub enum Action {
-    Reply(Reply<Encodable>),
+    Reply(Reply<OutgoingMessage>),
     NoReply(NoReply),
 }
 impl Future for Action {
-    type Item = Option<(MessageSeqNo, Encodable)>;
+    type Item = Option<(MessageSeqNo, OutgoingMessage)>;
     type Error = Never;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
@@ -357,7 +357,7 @@ where
 
         let encoder_maker = Arc::clone(&self.encoder_maker);
         Ok(Action::Reply(reply.into_encodable(move |v| {
-            Encodable::new(encoder_maker.make_encoder(v))
+            OutgoingMessage::new(encoder_maker.make_encoder(v))
         })))
     }
 }

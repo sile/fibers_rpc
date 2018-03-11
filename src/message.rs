@@ -33,20 +33,21 @@ impl MessageSeqNo {
     }
 }
 
-pub struct Encodable(Box<FnMut(&mut [u8]) -> Result<usize> + Send + 'static>);
-impl Encodable {
+pub struct OutgoingMessage(Box<FnMut(&mut [u8]) -> Result<usize> + Send + 'static>);
+impl OutgoingMessage {
     pub fn new<T, E>(mut encoder: E) -> Self
     where
         E: Encode<T> + Send + 'static,
     {
-        Encodable(Box::new(move |buf| track!(encoder.encode(buf))))
+        OutgoingMessage(Box::new(move |buf| track!(encoder.encode(buf))))
     }
+
     pub fn encode(&mut self, buf: &mut [u8]) -> Result<usize> {
         track!((self.0)(buf))
     }
 }
-impl fmt::Debug for Encodable {
+impl fmt::Debug for OutgoingMessage {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Encodable(_)")
+        write!(f, "OutgoingMessage(_)")
     }
 }

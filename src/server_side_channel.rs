@@ -5,7 +5,7 @@ use slog::Logger;
 use Error;
 use frame::HandleFrame;
 use frame_stream::FrameStream;
-use message::{Encodable, MessageSeqNo};
+use message::{MessageSeqNo, OutgoingMessage};
 use message_stream::{MessageStream, MessageStreamEvent};
 use server_side_handlers::{Action, IncomingFrameHandler};
 
@@ -23,7 +23,7 @@ impl ServerSideChannel {
         }
     }
 
-    pub fn reply(&mut self, seqno: MessageSeqNo, message: Encodable) {
+    pub fn reply(&mut self, seqno: MessageSeqNo, message: OutgoingMessage) {
         self.message_stream.send_message(seqno, message);
     }
 }

@@ -11,7 +11,7 @@ use futures::{Async, Future, Poll, Stream};
 use Error;
 use client_side_channel::ClientSideChannel;
 use client_side_handlers::BoxResponseHandler;
-use message::Encodable;
+use message::OutgoingMessage;
 use rpc_client::RpcClient;
 
 #[derive(Debug)]
@@ -188,7 +188,7 @@ impl RpcChannelHandle {
 }
 
 pub struct Message {
-    pub message: Encodable,
+    pub message: OutgoingMessage,
     pub response_handler: Option<BoxResponseHandler>,
     pub force_wakeup: bool,
 }
