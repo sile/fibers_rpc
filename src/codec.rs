@@ -1,24 +1,21 @@
 //! RPC message decoder/encoder.
 use std::cmp;
-use std::io::{Cursor, Read};
+use std::io::{self, Cursor, Read, Write};
 use std::marker::PhantomData;
 use std::mem;
 
-use {Error, ErrorKind, Result};
-
-/// The maximum size of encoding/decoding buffers.
-pub const MAX_BUFFER_SIZE: usize = 0xFFFF;
+use {Error, Result};
 
 /// This trait allows for incrementally decoding an RPC message from a sequence of bytes.
 pub trait Decode<T> {
     /// Proceeds decoding by consuming the given fragment of a byte sequence.
-    fn decode(&mut self, buf: &[u8]) -> Result<()>;
+    fn decode(&mut self, buf: &[u8], eos: bool) -> Result<()>;
 
     /// Finishes decoding and returns the resulting message.
     fn finish(&mut self) -> Result<T>;
 }
 impl Decode<Vec<u8>> for Vec<u8> {
-    fn decode(&mut self, buf: &[u8]) -> Result<()> {
+    fn decode(&mut self, buf: &[u8], _eos: bool) -> Result<()> {
         self.extend_from_slice(buf);
         Ok(())
     }
@@ -29,31 +26,39 @@ impl Decode<Vec<u8>> for Vec<u8> {
 
 /// This trait represents decodable messages (i.e., can be decoded without the help of any special decoders).
 pub trait DecodeFrom: Sized {
-    /// Decodes a message from `buf`.
-    fn decode_from(buf: &[u8]) -> Result<Self>;
-}
-impl DecodeFrom for Vec<u8> {
-    fn decode_from(buf: &[u8]) -> Result<Self> {
-        Ok(buf.to_owned())
-    }
+    /// Decodes a message from `reader`.
+    fn decode_from<R: Read>(reader: R) -> Result<Self>;
 }
 
 /// An implementation of `Decode` trait which decodes messages by using `T::DecodeFrom` function.
 #[derive(Debug)]
-pub struct SelfDecoder<T>(Option<T>);
+pub struct SelfDecoder<T> {
+    buf: Vec<u8>,
+    message: Option<T>,
+}
 impl<T: DecodeFrom> Decode<T> for SelfDecoder<T> {
-    fn decode(&mut self, buf: &[u8]) -> Result<()> {
-        track_assert!(self.0.is_none(), ErrorKind::InvalidInput);
-        self.0 = Some(track!(T::decode_from(buf))?);
+    fn decode(&mut self, buf: &[u8], eos: bool) -> Result<()> {
+        if self.buf.is_empty() && eos {
+            self.message = Some(track!(T::decode_from(buf))?);
+        } else {
+            self.buf.extend_from_slice(buf);
+        }
         Ok(())
     }
     fn finish(&mut self) -> Result<T> {
-        Ok(track_assert_some!(self.0.take(), ErrorKind::InvalidInput))
+        if let Some(message) = self.message.take() {
+            Ok(message)
+        } else {
+            track!(T::decode_from(&self.buf[..]))
+        }
     }
 }
 impl<T> Default for SelfDecoder<T> {
     fn default() -> Self {
-        SelfDecoder(None)
+        SelfDecoder {
+            buf: Vec::new(),
+            message: None,
+        }
     }
 }
 
@@ -73,36 +78,37 @@ impl<T: AsRef<[u8]>> Encode<T> for Cursor<T> {
 
 /// This trait represents encodable messages (i.e., can be encoded without the help of any special encoders).
 pub trait EncodeTo {
-    /// Encodes a message to `buf`.
-    ///
-    /// Note that the size of `buf` is between `MAX_BUFFER_SIZE - 4` and `MAX_BUFFER_SIZE`.
-    /// If you would like to encode large messages, please use other means
-    /// (e.g., Implements `Encode` or `ToBytes` traits).
-    fn encode_to(&self, buf: &mut [u8]) -> Result<usize>;
-}
-impl EncodeTo for Vec<u8> {
-    fn encode_to(&self, buf: &mut [u8]) -> Result<usize> {
-        track_assert!(self.len() <= buf.len(), ErrorKind::InvalidInput);
-        (&mut buf[..self.len()]).copy_from_slice(self);
-        Ok(self.len())
-    }
+    /// Encodes a message to `writer`.
+    fn encode_to<W: Write>(&self, writer: W) -> Result<()>;
 }
 
 /// An implementation of `Encode` trait which encodes messages by using `T::encode_to` method.
 #[derive(Debug)]
-pub struct SelfEncoder<T>(Option<T>);
+pub struct SelfEncoder<T> {
+    buf: BytesEncoder<Vec<u8>>,
+    message: Option<T>,
+}
 impl<T: EncodeTo> Encode<T> for SelfEncoder<T> {
     fn encode(&mut self, buf: &mut [u8]) -> Result<usize> {
-        if let Some(t) = self.0.take() {
-            track!(t.encode_to(buf))
+        if let Some(t) = self.message.take() {
+            let mut temp = TempBuf::new(buf);
+            track!(t.encode_to(&mut temp))?;
+            let (size, extra_buf) = temp.finish();
+            if !extra_buf.is_empty() {
+                self.buf = BytesEncoder::new(extra_buf);
+            }
+            Ok(size)
         } else {
-            Ok(0)
+            track!(self.buf.encode(buf))
         }
     }
 }
 impl<T> From<T> for SelfEncoder<T> {
     fn from(f: T) -> Self {
-        SelfEncoder(Some(f))
+        SelfEncoder {
+            buf: BytesEncoder::new(Vec::new()),
+            message: Some(f),
+        }
     }
 }
 
@@ -198,74 +204,33 @@ impl<T, E> Default for IntoEncoderMaker<T, E> {
     }
 }
 
-/// This trait allows for converting a byte sequence to an instance of the implementation type.
-pub trait FromBytes: Sized {
-    /// Converts `bytes` to `Self`.
-    fn from_bytes(bytes: &[u8]) -> Result<Self>;
-}
-
-/// This trait allows for converting an instance of the implementation to a byte sequence.
-pub trait ToBytes {
-    /// Converts `Self` to `Vec<u8>`.
-    fn to_bytes(&self) -> Result<Vec<u8>>;
-}
-
-/// `BatchDecoder` reads all bytes at first, then converts the bytes to a `T` message.
 #[derive(Debug)]
-pub struct BatchDecoder<T> {
-    bytes: Vec<u8>,
-    _message: PhantomData<T>,
+struct TempBuf<'a> {
+    buf: Cursor<&'a mut [u8]>,
+    extra_buf: Vec<u8>,
 }
-impl<T> BatchDecoder<T> {
-    /// Makes a new `BatchDecoder` instance.
-    pub fn new() -> Self {
-        BatchDecoder {
-            bytes: Vec::new(),
-            _message: PhantomData,
+impl<'a> TempBuf<'a> {
+    fn new(buf: &'a mut [u8]) -> Self {
+        TempBuf {
+            buf: Cursor::new(buf),
+            extra_buf: Vec::new(),
         }
     }
+
+    fn finish(self) -> (usize, Vec<u8>) {
+        (self.buf.position() as usize, self.extra_buf)
+    }
 }
-impl<T: FromBytes> Decode<T> for BatchDecoder<T> {
-    fn decode(&mut self, buf: &[u8]) -> Result<()> {
-        self.bytes.extend_from_slice(buf);
+impl<'a> Write for TempBuf<'a> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let size = self.buf.write(buf)?;
+        if size < buf.len() {
+            self.extra_buf.extend_from_slice(buf);
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
         Ok(())
-    }
-    fn finish(&mut self) -> Result<T> {
-        track!(T::from_bytes(&self.bytes))
-    }
-}
-impl<T> Default for BatchDecoder<T> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// `BatchEncoder` converts a whole `T` message to bytes at first,
-/// then writing the bytes to encoding buffers incrementally.
-#[derive(Debug)]
-pub struct BatchEncoder<T> {
-    bytes: Cursor<Vec<u8>>,
-    message: Option<T>,
-}
-impl<T> BatchEncoder<T> {
-    /// Makes a new `BatchEncoder` instance.
-    pub fn new(message: T) -> Self {
-        BatchEncoder {
-            bytes: Cursor::new(Vec::new()),
-            message: Some(message),
-        }
-    }
-}
-impl<T: ToBytes> Encode<T> for BatchEncoder<T> {
-    fn encode(&mut self, buf: &mut [u8]) -> Result<usize> {
-        if let Some(message) = self.message.take() {
-            self.bytes = Cursor::new(track!(message.to_bytes())?);
-        }
-        track!(self.bytes.encode(buf))
-    }
-}
-impl<T> From<T> for BatchEncoder<T> {
-    fn from(f: T) -> Self {
-        Self::new(f)
     }
 }

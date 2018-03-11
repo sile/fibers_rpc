@@ -194,7 +194,7 @@ impl HandleFrame for IncomingFrameHandler {
         }
 
         let mut handler = self.runnings.remove(&frame.seqno()).expect("Never fails");
-        track!(handler.handle_message(&frame.data()[offset..]))?;
+        track!(handler.handle_message(&frame.data()[offset..], frame.is_end_of_message()))?;
         if frame.is_end_of_message() {
             let action = track!(handler.finish())?;
             Ok(Some(action))
@@ -232,7 +232,7 @@ pub trait MessageHandlerFactory: Send + Sync + 'static {
 }
 
 pub trait HandleMessage: Send + 'static {
-    fn handle_message(&mut self, data: &[u8]) -> Result<()>;
+    fn handle_message(&mut self, data: &[u8], eos: bool) -> Result<()>;
     fn finish(&mut self) -> Result<Action>;
 }
 
@@ -282,8 +282,8 @@ where
     T: Cast,
     H: HandleCast<T>,
 {
-    fn handle_message(&mut self, data: &[u8]) -> Result<()> {
-        track!(self.decoder.decode(data))
+    fn handle_message(&mut self, data: &[u8], eos: bool) -> Result<()> {
+        track!(self.decoder.decode(data, eos))
     }
     fn finish(&mut self) -> Result<Action> {
         let notification = track!(self.decoder.finish())?;
@@ -347,8 +347,8 @@ where
     H: HandleCall<T>,
     E: MakeEncoder<T::Response, T::ResponseEncoder>,
 {
-    fn handle_message(&mut self, data: &[u8]) -> Result<()> {
-        track!(self.decoder.decode(data))
+    fn handle_message(&mut self, data: &[u8], eos: bool) -> Result<()> {
+        track!(self.decoder.decode(data, eos))
     }
     fn finish(&mut self) -> Result<Action> {
         let request = track!(self.decoder.finish())?;

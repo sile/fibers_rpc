@@ -75,7 +75,7 @@ impl<T, D: Decode<T>> ResponseHandler<T, D> {
 impl<T, D: Decode<T>> HandleFrame for ResponseHandler<T, D> {
     type Item = ();
     fn handle_frame(&mut self, frame: &Frame) -> Result<Option<Self::Item>> {
-        track!(self.decoder.decode(frame.data()))?;
+        track!(self.decoder.decode(frame.data(), frame.is_end_of_message()))?;
         if frame.is_end_of_message() {
             let response = track!(self.decoder.finish())?;
             let reply_tx = self.reply_tx.take().expect("Never fails");
