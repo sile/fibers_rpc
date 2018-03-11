@@ -33,16 +33,8 @@ impl<H: HandleFrame> MessageStream<H> {
     pub fn incoming_frame_handler_mut(&mut self) -> &mut H {
         &mut self.incoming_frame_handler
     }
-}
-impl<H: HandleFrame> Stream for MessageStream<H> {
-    type Item = MessageStreamEvent<H::Future>;
-    type Error = Error;
 
-    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        if track!(self.frame_stream.poll())?.is_ready() {
-            return Ok(Async::Ready(None));
-        }
-
+    fn handle_outgoing_messages(&mut self) {
         while let Some((seqno, mut message)) = self.outgoing_messages.pop_front() {
             let result = self.frame_stream
                 .send_frame(seqno, |mut frame| track!(message.encode(frame.data())));
@@ -55,13 +47,16 @@ impl<H: HandleFrame> Stream for MessageStream<H> {
                     self.event_queue.push_back(event);
                 }
                 Ok(None) => {
+                    // The sending buffer is full
                     self.outgoing_messages.push_front((seqno, message));
                     break;
                 }
                 Ok(Some(false)) => {
+                    // A part of the message was written to the sending buffer
                     self.outgoing_messages.push_back((seqno, message));
                 }
                 Ok(Some(true)) => {
+                    // Completed to write the message to the sending buffer
                     let event = MessageStreamEvent::Sent {
                         seqno,
                         result: Ok(()),
@@ -70,7 +65,9 @@ impl<H: HandleFrame> Stream for MessageStream<H> {
                 }
             }
         }
+    }
 
+    fn handle_incoming_frames(&mut self) {
         while let Some(frame) = self.frame_stream.recv_frame() {
             let seqno = frame.seqno;
             if self.cancelled_incoming_messages.contains(&seqno) {
@@ -80,35 +77,45 @@ impl<H: HandleFrame> Stream for MessageStream<H> {
                 continue;
             }
 
-            if frame.is_error() {
-                let event = MessageStreamEvent::Received {
-                    seqno,
-                    result: Err(track!(ErrorKind::InvalidInput.error()).into()),
-                };
-                self.event_queue.push_back(event);
+            let result = if frame.is_error() {
+                Err(track!(ErrorKind::InvalidInput.error()).into())
             } else {
-                match track!(self.incoming_frame_handler.handle_frame(frame)) {
-                    Err(e) => {
-                        if !frame.is_end_of_message() {
-                            self.cancelled_incoming_messages.insert(seqno);
-                        }
-                        let event = MessageStreamEvent::Received {
-                            seqno,
-                            result: Err(e),
-                        };
-                        self.event_queue.push_back(event);
+                track!(self.incoming_frame_handler.handle_frame(frame))
+            };
+            match result {
+                Err(e) => {
+                    if !frame.is_end_of_message() {
+                        self.cancelled_incoming_messages.insert(seqno);
                     }
-                    Ok(None) => {}
-                    Ok(Some(message)) => {
-                        let event = MessageStreamEvent::Received {
-                            seqno,
-                            result: Ok(message),
-                        };
-                        self.event_queue.push_back(event);
-                    }
+                    let event = MessageStreamEvent::Received {
+                        seqno,
+                        result: Err(e),
+                    };
+                    self.event_queue.push_back(event);
+                }
+                Ok(None) => {}
+                Ok(Some(message)) => {
+                    let event = MessageStreamEvent::Received {
+                        seqno,
+                        result: Ok(message),
+                    };
+                    self.event_queue.push_back(event);
                 }
             }
         }
+    }
+}
+impl<H: HandleFrame> Stream for MessageStream<H> {
+    type Item = MessageStreamEvent<H::Future>;
+    type Error = Error;
+
+    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
+        if track!(self.frame_stream.poll())?.is_ready() {
+            return Ok(Async::Ready(None));
+        }
+
+        self.handle_outgoing_messages();
+        self.handle_incoming_frames();
 
         if let Some(event) = self.event_queue.pop_front() {
             Ok(Async::Ready(Some(event)))

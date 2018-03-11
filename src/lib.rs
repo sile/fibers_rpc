@@ -23,12 +23,12 @@ pub mod server {
     pub use server_side_handlers::{HandleCall, HandleCast, Never, NoReply, Reply};
 }
 
-mod client_service;
-mod client_side_channel;
-mod client_side_handlers;
+mod client_service; // TODO:
+mod client_side_channel; // TODO:
+mod client_side_handlers; // TODO:
 mod error;
-mod frame;
-mod frame_stream;
+mod frame; // TODO:
+mod frame_stream; // TODO:
 mod message;
 mod message_stream;
 mod rpc_client;

@@ -20,7 +20,8 @@ impl MessageSeqNo {
 
     pub fn next(&mut self) -> Self {
         let n = self.0;
-        self.0 |= (self.0 + 1) & ((1 << 63) - 1);
+        let msb = n >> 63;
+        self.0 = (msb << 63) | (n.wrapping_add(1) & ((1 << 63) - 1));
         MessageSeqNo(n)
     }
 
@@ -49,5 +50,39 @@ impl OutgoingMessage {
 impl fmt::Debug for OutgoingMessage {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "OutgoingMessage(_)")
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::u64;
+
+    use super::*;
+
+    #[test]
+    fn message_seqno() {
+        let mut seqno = MessageSeqNo::new_client_side_seqno();
+        assert_eq!(seqno.as_u64(), 0);
+
+        let prev = seqno.next();
+        assert_eq!(prev.as_u64(), 0);
+        assert_eq!(seqno.as_u64(), 1);
+    }
+
+    #[test]
+    fn seqno_overflow() {
+        // for client
+        let mut seqno = MessageSeqNo::from_u64((1 << 63) - 1);
+        assert_eq!(seqno.as_u64(), (1 << 63) - 1);
+
+        seqno.next();
+        assert_eq!(seqno.as_u64(), 0);
+
+        // for server
+        let mut seqno = MessageSeqNo::from_u64(u64::MAX);
+        assert_eq!(seqno.as_u64(), u64::MAX);
+
+        seqno.next();
+        assert_eq!(seqno.as_u64(), 1 << 63);
     }
 }
