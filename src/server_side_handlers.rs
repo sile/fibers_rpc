@@ -187,7 +187,7 @@ impl HandleFrame for IncomingFrameHandler {
                 self.handlers.get(&procedure),
                 ErrorKind::InvalidInput,
                 "Unregistered RPC: {:?}",
-                procedure
+                procedure,
             );
             let handler = factory.create_message_handler(frame.seqno());
             self.runnings.insert(frame.seqno(), handler);
@@ -357,7 +357,7 @@ where
 
         let encoder_maker = Arc::clone(&self.encoder_maker);
         Ok(Action::Reply(reply.into_encodable(move |v| {
-            OutgoingMessage::new(encoder_maker.make_encoder(v))
+            OutgoingMessage::new(None, encoder_maker.make_encoder(v))
         })))
     }
 }

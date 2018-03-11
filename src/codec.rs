@@ -12,9 +12,6 @@ pub const MAX_BUFFER_SIZE: usize = 0xFFFF;
 /// This trait allows for incrementally decoding an RPC message from a sequence of bytes.
 pub trait Decode<T> {
     /// Proceeds decoding by consuming the given fragment of a byte sequence.
-    ///
-    /// The size of `buf` is `MAX_BUFFER_SIZE` or less than it.
-    /// The latter case indicates that the end of the byte sequence reached.
     fn decode(&mut self, buf: &[u8]) -> Result<()>;
 
     /// Finishes decoding and returns the resulting message.
@@ -66,8 +63,6 @@ pub trait Encode<T> {
     ///
     /// It returns the size of the written bytes.
     /// If the size is less than `buf.len()`, it means the encoding process completed.
-    ///
-    /// The size of `buf` always is `MAX_BUFFER_SIZE`.
     fn encode(&mut self, buf: &mut [u8]) -> Result<usize>;
 }
 impl<T: AsRef<[u8]>> Encode<T> for Cursor<T> {
@@ -80,7 +75,7 @@ impl<T: AsRef<[u8]>> Encode<T> for Cursor<T> {
 pub trait EncodeTo {
     /// Encodes a message to `buf`.
     ///
-    /// Note that the size of `buf` always is `MAX_BUFFER_SIZE`.
+    /// Note that the size of `buf` is between `MAX_BUFFER_SIZE - 4` and `MAX_BUFFER_SIZE`.
     /// If you would like to encode large messages, please use other means
     /// (e.g., Implements `Encode` or `ToBytes` traits).
     fn encode_to(&self, buf: &mut [u8]) -> Result<usize>;

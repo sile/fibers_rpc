@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 use std::fmt;
 use fibers::sync::oneshot;
+use futures::{Future, Poll};
+use trackable::error::ErrorKindExt;
 
-use {Error, Result};
+use {Error, ErrorKind, Result};
 use codec::Decode;
 use frame::{Frame, HandleFrame};
 use message::MessageSeqNo;
@@ -60,11 +62,14 @@ pub struct ResponseHandler<T, D> {
     reply_tx: Option<oneshot::Monitored<T, Error>>,
 }
 impl<T, D: Decode<T>> ResponseHandler<T, D> {
-    pub fn new(decoder: D, reply_tx: oneshot::Monitored<T, Error>) -> Self {
-        ResponseHandler {
+    pub fn new(decoder: D) -> (Self, Response<T>) {
+        let (reply_tx, reply_rx) = oneshot::monitor();
+        let handler = ResponseHandler {
             decoder,
             reply_tx: Some(reply_tx),
-        }
+        };
+        let response = Response { reply_rx };
+        (handler, response)
     }
 }
 impl<T, D: Decode<T>> HandleFrame for ResponseHandler<T, D> {
@@ -83,5 +88,24 @@ impl<T, D: Decode<T>> HandleFrame for ResponseHandler<T, D> {
     fn handle_error(&mut self, _seqno: MessageSeqNo, error: Error) {
         let reply_tx = self.reply_tx.take().expect("Never fails");
         let _ = reply_tx.exit(Err(error));
+    }
+}
+
+#[derive(Debug)]
+pub struct Response<T> {
+    reply_rx: oneshot::Monitor<T, Error>,
+}
+impl<T> Future for Response<T> {
+    type Item = T;
+    type Error = Error;
+
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        self.reply_rx.poll().map_err(|e| {
+            track!(e.unwrap_or_else(|| {
+                ErrorKind::Other
+                    .cause("RPC response monitoring channel disconnected")
+                    .into()
+            }))
+        })
     }
 }

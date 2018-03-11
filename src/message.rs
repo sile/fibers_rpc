@@ -1,6 +1,7 @@
 use std::fmt;
+use byteorder::{BigEndian, ByteOrder};
 
-use Result;
+use {ProcedureId, Result};
 use codec::Encode;
 
 /// Message sequence number.
@@ -34,17 +35,29 @@ impl MessageSeqNo {
     }
 }
 
-pub struct OutgoingMessage(Box<FnMut(&mut [u8]) -> Result<usize> + Send + 'static>);
+pub struct OutgoingMessage {
+    id: Option<ProcedureId>,
+    encode: Box<FnMut(&mut [u8]) -> Result<usize> + Send + 'static>,
+}
 impl OutgoingMessage {
-    pub fn new<T, E>(mut encoder: E) -> Self
+    pub fn new<T, E>(id: Option<ProcedureId>, mut encoder: E) -> Self
     where
         E: Encode<T> + Send + 'static,
     {
-        OutgoingMessage(Box::new(move |buf| track!(encoder.encode(buf))))
+        OutgoingMessage {
+            id,
+            encode: Box::new(move |buf| track!(encoder.encode(buf))),
+        }
     }
 
     pub fn encode(&mut self, buf: &mut [u8]) -> Result<usize> {
-        track!((self.0)(buf))
+        let offset = if let Some(id) = self.id.take() {
+            BigEndian::write_u32(buf, id.0);
+            4
+        } else {
+            0
+        };
+        track!((self.encode)(&mut buf[offset..])).map(|size| offset + size)
     }
 }
 impl fmt::Debug for OutgoingMessage {

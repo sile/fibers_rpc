@@ -31,7 +31,7 @@ mod frame;
 mod frame_stream;
 mod message;
 mod message_stream;
-mod rpc_client;
+mod rpc_client; // TODO
 mod rpc_server;
 mod server_side_channel;
 mod server_side_handlers;

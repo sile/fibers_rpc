@@ -7,14 +7,13 @@ extern crate sloggers;
 extern crate trackable;
 
 use std::net::ToSocketAddrs;
-use std::io::{self, Cursor, Read, Write};
+use std::io::{self, Read, Write};
 use clap::{App, Arg, SubCommand};
 use fibers::{Executor, InPlaceExecutor, Spawn};
-use fibers_rpc::ProcedureId;
+use fibers_rpc::{Call, ProcedureId};
 use fibers_rpc::client::RpcClientServiceBuilder;
-use fibers_rpc::server::RpcServerBuilder;
-use fibers_rpc::server_side_handlers::{NoReply, Reply};
-use fibers_rpc::traits::{BytesEncoder, Call, Cast, HandleCall, HandleCast};
+use fibers_rpc::codec::BytesEncoder;
+use fibers_rpc::server::{HandleCall, Reply, RpcServerBuilder};
 use futures::Future;
 use sloggers::Build;
 use sloggers::terminal::TerminalLoggerBuilder;
@@ -22,16 +21,12 @@ use sloggers::types::Severity;
 use trackable::error::{ErrorKindExt, Failed, Failure};
 
 struct EchoRpc;
-impl Cast for EchoRpc {
-    const PROCEDURE: ProcedureId = 0;
-    type Notification = Vec<u8>;
-    type Encoder = Cursor<Vec<u8>>;
-    type Decoder = Vec<u8>;
-}
 impl Call for EchoRpc {
-    const PROCEDURE: ProcedureId = 1;
+    const ID: ProcedureId = ProcedureId(0);
+    const NAME: &'static str = "echo";
+
     type Request = Vec<u8>;
-    type RequestEncoder = Cursor<Vec<u8>>;
+    type RequestEncoder = BytesEncoder<Vec<u8>>;
     type RequestDecoder = Vec<u8>;
 
     type Response = Vec<u8>;
@@ -41,20 +36,12 @@ impl Call for EchoRpc {
 
 #[derive(Clone)]
 struct EchoHandler;
-impl HandleCast<EchoRpc> for EchoHandler {
-    fn handle_cast(&self, notification: <EchoRpc as Cast>::Notification) -> NoReply {
-        println!("# RECV: {:?}", notification);
-        NoReply::done()
-    }
-}
 impl HandleCall<EchoRpc> for EchoHandler {
     fn handle_call(
         &self,
         request: <EchoRpc as Call>::Request,
     ) -> Reply<<EchoRpc as Call>::Response> {
-        println!("# Request: {:?}", request);
-        unimplemented!();
-        // Reply::done(request)
+        Reply::done(request)
     }
 }
 
@@ -74,7 +61,7 @@ fn main() {
                 .possible_values(&["debug", "info", "warning", "error"]),
         )
         .subcommand(SubCommand::with_name("server"))
-        .subcommand(SubCommand::with_name("client").arg(Arg::with_name("CAST").long("cast")))
+        .subcommand(SubCommand::with_name("client"))
         .get_matches();
 
     let addr = track_try_unwrap!(
@@ -96,7 +83,6 @@ fn main() {
     if let Some(_matches) = matches.subcommand_matches("server") {
         let server = RpcServerBuilder::new(addr)
             .logger(logger)
-            .cast_handler(EchoHandler)
             .call_handler(EchoHandler)
             .finish(executor.handle());
         let fiber = executor.spawn_monitor(server);
@@ -115,22 +101,11 @@ fn main() {
                 .read_to_end(&mut buf)
                 .map_err(Failure::from_error)
         );
-        if matches.is_present("CAST") {
-            client
-                .cast_options::<EchoRpc>()
-                .with_encoder(Cursor::new)
-                .cast(addr, buf);
-            track_try_unwrap!(executor.run().map_err(Failure::from_error));
-        } else {
-            let future = client
-                .call_options::<EchoRpc>()
-                .with_encoder(Cursor::new)
-                .call(addr, buf);
-            let result =
-                track_try_unwrap!(executor.run_future(future).map_err(Failure::from_error));
-            let response = track_try_unwrap!(result);
-            let _ = std::io::stdout().write(&response);
-        }
+
+        let future = client.call::<EchoRpc>(addr, buf);
+        let result = track_try_unwrap!(executor.run_future(future).map_err(Failure::from_error));
+        let response = track_try_unwrap!(result);
+        let _ = std::io::stdout().write(&response);
     } else {
         println!("{}", matches.usage());
         std::process::exit(1);
