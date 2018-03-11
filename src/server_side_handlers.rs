@@ -40,7 +40,7 @@ impl<T> Reply<T> {
         F: Future<Item = T, Error = Never> + Send + 'static,
     {
         Reply {
-            seqno: 0, // dummy initial value
+            seqno: MessageSeqNo::from_u64(0), // dummy initial value
             either: Either::A(Box::new(future)),
         }
     }
@@ -48,7 +48,7 @@ impl<T> Reply<T> {
     /// Makes a `Reply` instance which replies the response immediately.
     pub fn done(response: T) -> Self {
         Reply {
-            seqno: 0, // dummy initial value
+            seqno: MessageSeqNo::from_u64(0), // dummy initial value
             either: Either::B(Some(response)),
         }
     }
@@ -95,7 +95,7 @@ impl<T> Future for Reply<T> {
 }
 impl<T> fmt::Debug for Reply<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Reply {{ seqno: {}, .. }}", self.seqno)
+        write!(f, "Reply {{ seqno: {:?}, .. }}", self.seqno)
     }
 }
 

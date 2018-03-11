@@ -13,7 +13,7 @@ use codec::{DefaultDecoderMaker, IntoEncoderMaker, MakeDecoder, MakeEncoder};
 use message::{Encodable, MessageSeqNo};
 use server_side_channel::ServerSideChannel;
 use server_side_handlers::{Action, CallHandlerFactory, CastHandlerFactory, HandleCall, HandleCast,
-                           IncomingFrameHandler, MessageHandlers, Never, NoReply, Reply};
+                           IncomingFrameHandler, MessageHandlers, Never};
 
 /// RPC server builder.
 pub struct RpcServerBuilder {

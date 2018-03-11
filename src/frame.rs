@@ -4,7 +4,7 @@ use {Error, Result};
 use message::MessageSeqNo;
 
 const MAX_FRAME_SIZE: usize = FRAME_HEADER_SIZE + MAX_FRAME_DATA_SIZE;
-const FRAME_HEADER_SIZE: usize = 4 + 1 + 2;
+const FRAME_HEADER_SIZE: usize = 8 + 1 + 2;
 pub const MAX_FRAME_DATA_SIZE: usize = 0xFFFF;
 
 pub const FLAG_ERROR: u8 = 0b0000_0001;
@@ -45,9 +45,9 @@ impl FrameRecvBuf {
         let data_start = header_start + FRAME_HEADER_SIZE;
 
         // header
-        let seqno = BigEndian::read_u32(&self.buf[header_start..]);
-        let flags = self.buf[header_start + 4];
-        let data_len = BigEndian::read_u16(&self.buf[header_start + 5..]) as usize;
+        let seqno = MessageSeqNo::from_u64(BigEndian::read_u64(&self.buf[header_start..]));
+        let flags = self.buf[header_start + 8];
+        let data_len = BigEndian::read_u16(&self.buf[header_start + 9..]) as usize;
         let frame_end = data_start + data_len;
 
         // data
@@ -100,21 +100,21 @@ impl FrameSendBuf {
             let frame = FrameMut {
                 frame_bytes: &mut self.buf[self.write_start..][..MAX_FRAME_SIZE],
             };
-            frame.frame_bytes[4] = 0;
+            frame.frame_bytes[8] = 0;
             Some(frame)
         }
     }
 
-    pub fn fix_frame(&mut self, seqno: u32, result: &Result<usize>) {
-        BigEndian::write_u32(&mut self.buf[self.write_start..], seqno);
+    pub fn fix_frame(&mut self, seqno: MessageSeqNo, result: &Result<usize>) {
+        BigEndian::write_u64(&mut self.buf[self.write_start..], seqno.as_u64());
         let frame_data_len = if let Ok(frame_data_len) = *result {
             debug_assert!(frame_data_len <= 0xFFFF);
             frame_data_len
         } else {
-            self.buf[self.write_start + 4] = FLAG_ERROR;
+            self.buf[self.write_start + 8] = FLAG_ERROR;
             0
         };
-        BigEndian::write_u16(&mut self.buf[self.write_start + 5..], frame_data_len as u16);
+        BigEndian::write_u16(&mut self.buf[self.write_start + 9..], frame_data_len as u16);
         self.write_start += FRAME_HEADER_SIZE + frame_data_len;
         debug_assert!(self.write_start <= self.buf.len());
     }
@@ -144,7 +144,7 @@ impl FrameSendBuf {
 // TODO: remove clone,copy
 #[derive(Debug, Clone, Copy)]
 pub struct Frame<'a> {
-    pub seqno: u32, // TODO: u64
+    pub seqno: MessageSeqNo,
     flags: u8,
     pub data: &'a [u8],
 }

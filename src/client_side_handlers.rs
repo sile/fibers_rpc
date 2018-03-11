@@ -37,7 +37,6 @@ impl HandleFrame for IncomingFrameHandler {
         }
     }
     fn handle_error(&mut self, seqno: MessageSeqNo, error: Error) {
-        let seqno = seqno & ((1 << 31) - 1); // TODO:
         if let Some(mut handler) = self.handlers.remove(&seqno) {
             handler.handle_error(seqno, error);
         }

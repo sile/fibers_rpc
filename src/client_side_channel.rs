@@ -31,7 +31,7 @@ impl ClientSideChannel {
             logger,
             server,
             keep_alive: KeepAlive::new(Duration::from_secs(60 * 10)),
-            next_seqno: 0,
+            next_seqno: MessageSeqNo::new_client_side_seqno(),
             message_stream: MessageStreamState::new(server),
             exponential_backoff: ExponentialBackoff::new(),
         }
@@ -42,9 +42,9 @@ impl ClientSideChannel {
         message: Encodable,
         response_handler: Option<BoxResponseHandler>,
     ) {
+        let seqno = self.next_seqno.next();
         self.message_stream
-            .send_message(self.next_seqno, message, response_handler);
-        self.next_seqno += 1;
+            .send_message(seqno, message, response_handler);
     }
 
     pub fn force_wakeup(&mut self) {
@@ -249,7 +249,7 @@ struct BufferedMessage {
 }
 impl fmt::Debug for BufferedMessage {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "BufferedMessage {{ seqno: {}, .. }}", self.seqno)
+        write!(f, "BufferedMessage {{ seqno: {:?}, .. }}", self.seqno)
     }
 }
 

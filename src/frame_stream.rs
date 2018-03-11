@@ -4,6 +4,7 @@ use futures::{Async, Future, Poll};
 
 use {Error, Result};
 use frame::{Frame, FrameMut, FrameRecvBuf, FrameSendBuf, MAX_FRAME_DATA_SIZE};
+use message::MessageSeqNo;
 
 #[derive(Debug)]
 pub struct FrameStream {
@@ -23,7 +24,7 @@ impl FrameStream {
         }
     }
 
-    pub fn send_frame<F>(&mut self, seqno: u32, f: F) -> Result<Option<bool>>
+    pub fn send_frame<F>(&mut self, seqno: MessageSeqNo, f: F) -> Result<Option<bool>>
     where
         F: FnOnce(FrameMut) -> Result<usize>,
     {
