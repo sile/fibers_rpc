@@ -5,9 +5,94 @@ use message::MessageSeqNo;
 
 const MAX_FRAME_SIZE: usize = FRAME_HEADER_SIZE + MAX_FRAME_DATA_SIZE;
 const FRAME_HEADER_SIZE: usize = 8 + 1 + 2;
-pub const MAX_FRAME_DATA_SIZE: usize = 0xFFFF;
+const MAX_FRAME_DATA_SIZE: usize = 0xFFFF;
 
-pub const FLAG_ERROR: u8 = 0b0000_0001;
+const RECV_BUF_SIZE: usize = MAX_FRAME_SIZE * 4;
+const SEND_BUF_SIZE: usize = MAX_FRAME_SIZE * 2;
+
+const FLAG_ERROR: u8 = 0b0000_0001;
+
+#[derive(Debug)]
+pub struct Frame<'a> {
+    seqno: MessageSeqNo,
+    flags: u8,
+    data: &'a [u8],
+}
+impl<'a> Frame<'a> {
+    pub fn seqno(&self) -> MessageSeqNo {
+        self.seqno
+    }
+
+    pub fn data(&self) -> &[u8] {
+        self.data
+    }
+
+    pub fn is_error(&self) -> bool {
+        (self.flags & FLAG_ERROR) != 0
+    }
+
+    pub fn is_end_of_message(&self) -> bool {
+        self.data.len() < MAX_FRAME_DATA_SIZE
+    }
+
+    fn guess_frame_len(buf: &[u8]) -> usize {
+        if buf.len() < FRAME_HEADER_SIZE {
+            FRAME_HEADER_SIZE
+        } else {
+            let data_len = BigEndian::read_u16(&buf[9..]) as usize;
+            FRAME_HEADER_SIZE + data_len
+        }
+    }
+
+    fn from_bytes(buf: &'a [u8]) -> Self {
+        let seqno = MessageSeqNo::from_u64(BigEndian::read_u64(buf));
+        let flags = buf[8];
+        let data_len = BigEndian::read_u16(&buf[9..]) as usize;
+        let data = &buf[FRAME_HEADER_SIZE..][..data_len];
+        Frame { seqno, flags, data }
+    }
+}
+
+#[derive(Debug)]
+pub struct FrameMut<'a>(&'a mut FrameSendBuf);
+impl<'a> FrameMut<'a> {
+    pub fn data(&mut self) -> &mut [u8] {
+        &mut self.0.buf[self.0.write_start + FRAME_HEADER_SIZE..][..MAX_FRAME_DATA_SIZE]
+    }
+
+    pub fn ok(mut self, seqno: MessageSeqNo, data_len: usize) -> bool {
+        debug_assert!(data_len <= MAX_FRAME_DATA_SIZE);
+
+        BigEndian::write_u64(self.header(), seqno.as_u64());
+        self.header()[8] = 0;
+        BigEndian::write_u16(&mut self.header()[9..], data_len as u16);
+
+        self.0.write_start += FRAME_HEADER_SIZE + data_len;
+        debug_assert!(self.0.write_start <= self.0.buf.len());
+
+        data_len < MAX_FRAME_DATA_SIZE
+    }
+
+    pub fn err(mut self, seqno: MessageSeqNo) {
+        BigEndian::write_u64(self.header(), seqno.as_u64());
+        self.header()[8] = FLAG_ERROR;
+        BigEndian::write_u16(&mut self.header()[9..], 0);
+
+        self.0.write_start += FRAME_HEADER_SIZE;
+        debug_assert!(self.0.write_start <= self.0.buf.len());
+    }
+
+    fn header(&mut self) -> &mut [u8] {
+        &mut self.0.buf[self.0.write_start..]
+    }
+}
+
+pub trait HandleFrame {
+    type Item;
+
+    fn handle_frame(&mut self, frame: &Frame) -> Result<Option<Self::Item>>;
+    fn handle_error(&mut self, seqno: MessageSeqNo, error: Error);
+}
 
 #[derive(Debug)]
 pub struct FrameRecvBuf {
@@ -18,7 +103,7 @@ pub struct FrameRecvBuf {
 impl FrameRecvBuf {
     pub fn new() -> Self {
         FrameRecvBuf {
-            buf: vec![0; MAX_FRAME_SIZE * 4],
+            buf: vec![0; RECV_BUF_SIZE],
             read_start: 0,
             write_start: 0,
         }
@@ -38,43 +123,28 @@ impl FrameRecvBuf {
     }
 
     pub fn next_frame(&mut self) -> Option<Frame> {
-        if (self.write_start - self.read_start) < FRAME_HEADER_SIZE {
-            return None;
-        }
-        let header_start = self.read_start;
-        let data_start = header_start + FRAME_HEADER_SIZE;
-
-        // header
-        let seqno = MessageSeqNo::from_u64(BigEndian::read_u64(&self.buf[header_start..]));
-        let flags = self.buf[header_start + 8];
-        let data_len = BigEndian::read_u16(&self.buf[header_start + 9..]) as usize;
-        let frame_end = data_start + data_len;
-
-        // data
+        let frame_len = Frame::guess_frame_len(&self.buf[self.read_start..self.write_start]);
+        let frame_end = self.read_start + frame_len;
         if self.write_start < frame_end {
             if self.buf.len() < frame_end {
-                let remaining_len = self.write_start - header_start;
-                let (left, right) = self.buf.split_at_mut(header_start);
+                let remaining_len = self.write_start - self.read_start;
+                let (left, right) = self.buf.split_at_mut(self.read_start);
                 (&mut left[..remaining_len]).copy_from_slice(&right[..remaining_len]);
                 self.read_start = 0;
                 self.write_start = remaining_len;
             }
-            return None;
-        }
+            None
+        } else {
+            let frame = Frame::from_bytes(&self.buf[self.read_start..self.write_start]);
+            self.read_start += frame_len;
+            debug_assert!(self.read_start <= self.write_start);
 
-        // frame
-        let frame = Frame {
-            seqno,
-            flags,
-            data: &self.buf[data_start..frame_end],
-        };
-
-        self.read_start = frame_end;
-        if self.read_start == self.write_start {
-            self.read_start = 0;
-            self.write_start = 0;
+            if self.read_start == self.write_start {
+                self.read_start = 0;
+                self.write_start = 0;
+            }
+            Some(frame)
         }
-        Some(frame)
     }
 }
 
@@ -87,36 +157,18 @@ pub struct FrameSendBuf {
 impl FrameSendBuf {
     pub fn new() -> Self {
         FrameSendBuf {
-            buf: vec![0; MAX_FRAME_SIZE * 2],
+            buf: vec![0; SEND_BUF_SIZE],
             read_start: 0,
             write_start: 0,
         }
     }
 
-    pub fn peek_frame(&mut self) -> Option<FrameMut> {
+    pub fn next_frame(&mut self) -> Option<FrameMut> {
         if !self.has_space() {
             None
         } else {
-            let frame = FrameMut {
-                frame_bytes: &mut self.buf[self.write_start..][..MAX_FRAME_SIZE],
-            };
-            frame.frame_bytes[8] = 0;
-            Some(frame)
+            Some(FrameMut(self))
         }
-    }
-
-    pub fn fix_frame(&mut self, seqno: MessageSeqNo, result: &Result<usize>) {
-        BigEndian::write_u64(&mut self.buf[self.write_start..], seqno.as_u64());
-        let frame_data_len = if let Ok(frame_data_len) = *result {
-            debug_assert!(frame_data_len <= 0xFFFF);
-            frame_data_len
-        } else {
-            self.buf[self.write_start + 8] = FLAG_ERROR;
-            0
-        };
-        BigEndian::write_u16(&mut self.buf[self.write_start + 9..], frame_data_len as u16);
-        self.write_start += FRAME_HEADER_SIZE + frame_data_len;
-        debug_assert!(self.write_start <= self.buf.len());
     }
 
     pub fn readable_region(&self) -> &[u8] {
@@ -141,37 +193,203 @@ impl FrameSendBuf {
     }
 }
 
-// TODO: remove clone,copy
-#[derive(Debug, Clone, Copy)]
-pub struct Frame<'a> {
-    pub seqno: MessageSeqNo,
-    flags: u8,
-    pub data: &'a [u8],
-}
-impl<'a> Frame<'a> {
-    pub fn is_error(&self) -> bool {
-        (self.flags & FLAG_ERROR) != 0
+#[cfg(test)]
+mod test {
+    use std::io::Write;
+
+    use message::MessageSeqNo;
+    use super::*;
+
+    #[test]
+    fn send_buf_ok() {
+        let mut buf = FrameSendBuf::new();
+        assert!(buf.is_empty());
+        assert!(buf.readable_region().is_empty());
+
+        {
+            let seqno = MessageSeqNo::from_u64(0xFF);
+            let mut frame = buf.next_frame().unwrap();
+            (&mut frame.data()[..3]).copy_from_slice("foo".as_bytes());
+            let end_of_message = frame.ok(seqno, 3);
+            assert!(end_of_message);
+        }
+        assert_eq!(buf.readable_region().len(), FRAME_HEADER_SIZE + 3);
+        assert_eq!(
+            buf.readable_region(),
+            &[0, 0, 0, 0, 0, 0, 0, 0xFF, 0, 0, 3, b'f', b'o', b'o'][..]
+        );
+
+        assert!(!buf.is_empty());
+        buf.consume_readable_region(FRAME_HEADER_SIZE + 3);
+        assert!(buf.readable_region().is_empty());
+        assert!(buf.is_empty());
     }
 
-    pub fn is_end_of_message(&self) -> bool {
-        self.data.len() < MAX_FRAME_DATA_SIZE
+    #[test]
+    fn send_buf_error() {
+        let mut buf = FrameSendBuf::new();
+        {
+            let seqno = MessageSeqNo::from_u64(0xFF);
+            let mut frame = buf.next_frame().unwrap();
+            (&mut frame.data()[..3]).copy_from_slice("bar".as_bytes());
+            frame.err(seqno);
+        }
+        assert_eq!(buf.readable_region().len(), FRAME_HEADER_SIZE);
+        assert_eq!(
+            buf.readable_region(),
+            &[0, 0, 0, 0, 0, 0, 0, 0xFF, FLAG_ERROR, 0, 0][..]
+        );
+        buf.consume_readable_region(FRAME_HEADER_SIZE);
+        assert!(buf.is_empty());
     }
-}
 
-#[derive(Debug)]
-pub struct FrameMut<'a> {
-    frame_bytes: &'a mut [u8],
-}
-impl<'a> FrameMut<'a> {
-    pub fn data(&mut self) -> &mut [u8] {
-        &mut self.frame_bytes[FRAME_HEADER_SIZE..]
+    #[test]
+    fn send_buf_full() {
+        let mut buf = FrameSendBuf::new();
+
+        {
+            let seqno = MessageSeqNo::from_u64(0xFF);
+            let frame = buf.next_frame().unwrap();
+            let end_of_message = frame.ok(seqno, MAX_FRAME_DATA_SIZE);
+            assert!(!end_of_message);
+        }
+        assert_eq!(buf.readable_region().len(), MAX_FRAME_SIZE);
+        assert!(!buf.is_empty());
+
+        {
+            let seqno = MessageSeqNo::from_u64(0xFF);
+            let frame = buf.next_frame().unwrap();
+            let end_of_message = frame.ok(seqno, MAX_FRAME_DATA_SIZE);
+            assert!(!end_of_message);
+        }
+        assert_eq!(buf.readable_region().len(), MAX_FRAME_SIZE * 2);
+        assert!(!buf.is_empty());
+
+        assert!(buf.next_frame().is_none()); // full
+
+        buf.consume_readable_region(MAX_FRAME_SIZE * 2 - 1);
+        assert!(buf.next_frame().is_none()); // full
+
+        buf.consume_readable_region(1);
+        assert!(buf.next_frame().is_some()); // not full
     }
-}
 
-pub trait HandleFrame {
-    // TODO: rename
-    type Future;
+    #[test]
+    fn recv_buf_small_message() {
+        let mut buf = FrameRecvBuf::new();
+        assert!(!buf.is_full());
+        assert!(buf.next_frame().is_none());
+        assert_eq!(buf.writable_region().len(), RECV_BUF_SIZE);
 
-    fn handle_frame(&mut self, frame: Frame) -> Result<Option<Self::Future>>;
-    fn handle_error(&mut self, _seqno: MessageSeqNo, _error: Error) {}
+        let size = buf.writable_region()
+            .write(&[0, 0, 0, 0, 0, 0, 0, 0xFF, 0, 0, 3, b'f', b'o', b'o'][..])
+            .unwrap();
+        buf.consume_writable_region(size);
+        assert_eq!(buf.writable_region().len(), RECV_BUF_SIZE - size);
+        {
+            let frame = buf.next_frame().unwrap();
+            assert_eq!(frame.seqno().as_u64(), 0xFF);
+            assert_eq!(frame.data(), b"foo");
+            assert!(!frame.is_error());
+            assert!(frame.is_end_of_message());
+        }
+        assert!(!buf.is_full());
+        assert!(buf.next_frame().is_none());
+    }
+
+    #[test]
+    fn recv_buf_fragmented_message() {
+        let mut buf = FrameRecvBuf::new();
+
+        let size = buf.writable_region()
+            .write(&[0, 0, 0, 0, 0, 0, 0, 0xFF, 0, 0, 3, b'f'][..])
+            .unwrap();
+        buf.consume_writable_region(size);
+        assert!(buf.next_frame().is_none());
+
+        let size = buf.writable_region().write(&[b'o', b'o'][..]).unwrap();
+        buf.consume_writable_region(size);
+        {
+            let frame = buf.next_frame().unwrap();
+            assert_eq!(frame.seqno().as_u64(), 0xFF);
+            assert_eq!(frame.data(), b"foo");
+            assert!(!frame.is_error());
+            assert!(frame.is_end_of_message());
+        }
+        assert!(!buf.is_full());
+        assert!(buf.next_frame().is_none());
+    }
+
+    #[test]
+    fn recv_buf_full() {
+        let mut buf = FrameRecvBuf::new();
+
+        for _ in 0..(RECV_BUF_SIZE / MAX_FRAME_SIZE) {
+            buf.writable_region()
+                .write_all(&[0, 0, 0, 0, 0, 0, 0, 0xFF, 0, 0xFF, 0xFF][..])
+                .unwrap();
+            buf.consume_writable_region(FRAME_HEADER_SIZE);
+            buf.writable_region().write_all(&[0; 0xFFFF][..]).unwrap();
+            buf.consume_writable_region(0xFFFF);
+        }
+        assert!(buf.is_full());
+
+        for _ in 0..(RECV_BUF_SIZE / MAX_FRAME_SIZE) - 1 {
+            {
+                let frame = buf.next_frame().unwrap();
+                assert_eq!(frame.seqno().as_u64(), 0xFF);
+                assert_eq!(frame.data().len(), 0xFFFF);
+                assert!(!frame.is_error());
+                assert!(!frame.is_end_of_message());
+            }
+            assert!(buf.is_full());
+        }
+
+        assert!(buf.next_frame().is_some());
+        assert!(!buf.is_full());
+        assert!(buf.next_frame().is_none());
+    }
+
+    #[test]
+    fn recv_buf_shift() {
+        let mut buf = FrameRecvBuf::new();
+
+        for _ in 0..(RECV_BUF_SIZE / MAX_FRAME_SIZE) - 1 {
+            buf.writable_region()
+                .write_all(&[0, 0, 0, 0, 0, 0, 0, 0xFF, 0, 0xFF, 0xFF][..])
+                .unwrap();
+            buf.consume_writable_region(FRAME_HEADER_SIZE);
+            buf.consume_writable_region(0xFFFF);
+        }
+        buf.writable_region()
+            .write_all(&[0, 0, 0, 0, 0, 0, 0, 0xFF, 0, 0xFF, 0xF9][..])
+            .unwrap();
+        buf.consume_writable_region(FRAME_HEADER_SIZE);
+        buf.consume_writable_region(0xFFF9);
+        assert!(!buf.is_full());
+
+        buf.writable_region()
+            .write_all(&[0x11, 0x22, 0x33, 0x44, 0x55, 0x66])
+            .unwrap();
+        buf.consume_writable_region(6);
+        assert!(buf.is_full());
+        assert!(buf.writable_region().is_empty());
+
+        while buf.next_frame().is_some() {}
+        assert!(!buf.is_full());
+
+        buf.writable_region()
+            .write_all(&[0x77, 0x88, 0, 0, 3, b'f', b'o', b'o'][..])
+            .unwrap();
+        buf.consume_writable_region(8);
+
+        {
+            let frame = buf.next_frame().unwrap();
+            assert_eq!(frame.seqno().as_u64(), 0x1122_3344_5566_7788);
+            assert_eq!(frame.data(), b"foo");
+            assert!(!frame.is_error());
+            assert!(frame.is_end_of_message());
+        }
+        assert!(buf.next_frame().is_none());
+    }
 }

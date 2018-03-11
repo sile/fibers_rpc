@@ -27,8 +27,8 @@ mod client_service; // TODO:
 mod client_side_channel; // TODO:
 mod client_side_handlers; // TODO:
 mod error;
-mod frame; // TODO:
-mod frame_stream; // TODO:
+mod frame;
+mod frame_stream;
 mod message;
 mod message_stream;
 mod rpc_client;

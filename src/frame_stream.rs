@@ -3,7 +3,7 @@ use fibers::net::TcpStream;
 use futures::{Async, Future, Poll};
 
 use {Error, Result};
-use frame::{Frame, FrameMut, FrameRecvBuf, FrameSendBuf, MAX_FRAME_DATA_SIZE};
+use frame::{Frame, FrameMut, FrameRecvBuf, FrameSendBuf};
 use message::MessageSeqNo;
 
 #[derive(Debug)]
@@ -26,19 +26,21 @@ impl FrameStream {
 
     pub fn send_frame<F>(&mut self, seqno: MessageSeqNo, f: F) -> Result<Option<bool>>
     where
-        F: FnOnce(FrameMut) -> Result<usize>,
+        F: FnOnce(&mut FrameMut) -> Result<usize>,
     {
-        let maybe_result = if let Some(frame) = self.send_buf.peek_frame() {
-            Some(track!(f(frame)))
-        } else {
-            None
-        };
-        match maybe_result {
-            None => Ok(None),
-            Some(result) => {
-                self.send_buf.fix_frame(seqno, &result);
-                result.map(|data_len| Some(data_len < MAX_FRAME_DATA_SIZE))
+        if let Some(mut frame) = self.send_buf.next_frame() {
+            match f(&mut frame) {
+                Err(e) => {
+                    frame.err(seqno);
+                    Err(track!(e))
+                }
+                Ok(data_len) => {
+                    let end_of_message = frame.ok(seqno, data_len);
+                    Ok(Some(end_of_message))
+                }
             }
+        } else {
+            Ok(None)
         }
     }
 

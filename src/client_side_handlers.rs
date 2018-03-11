@@ -22,9 +22,9 @@ impl IncomingFrameHandler {
     }
 }
 impl HandleFrame for IncomingFrameHandler {
-    type Future = ();
-    fn handle_frame(&mut self, frame: Frame) -> Result<Option<Self::Future>> {
-        let seqno = frame.seqno;
+    type Item = ();
+    fn handle_frame(&mut self, frame: &Frame) -> Result<Option<Self::Item>> {
+        let seqno = frame.seqno();
         if let Some(mut handler) = self.handlers.remove(&seqno) {
             if track!(handler.handle_frame(frame))?.is_some() {
                 Ok(Some(()))
@@ -52,7 +52,7 @@ impl fmt::Debug for IncomingFrameHandler {
     }
 }
 
-pub type BoxResponseHandler = Box<HandleFrame<Future = ()> + Send + 'static>;
+pub type BoxResponseHandler = Box<HandleFrame<Item = ()> + Send + 'static>;
 
 #[derive(Debug)]
 pub struct ResponseHandler<T, D> {
@@ -68,9 +68,9 @@ impl<T, D: Decode<T>> ResponseHandler<T, D> {
     }
 }
 impl<T, D: Decode<T>> HandleFrame for ResponseHandler<T, D> {
-    type Future = ();
-    fn handle_frame(&mut self, frame: Frame) -> Result<Option<Self::Future>> {
-        track!(self.decoder.decode(&frame.data))?;
+    type Item = ();
+    fn handle_frame(&mut self, frame: &Frame) -> Result<Option<Self::Item>> {
+        track!(self.decoder.decode(frame.data()))?;
         if frame.is_end_of_message() {
             let response = track!(self.decoder.finish())?;
             let reply_tx = self.reply_tx.take().expect("Never fails");

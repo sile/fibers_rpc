@@ -13,7 +13,7 @@ pub struct MessageStream<H: HandleFrame> {
     outgoing_messages: VecDeque<(MessageSeqNo, OutgoingMessage)>,
     incoming_frame_handler: H,
     cancelled_incoming_messages: HashSet<MessageSeqNo>,
-    event_queue: VecDeque<MessageStreamEvent<H::Future>>,
+    event_queue: VecDeque<MessageStreamEvent<H::Item>>,
 }
 impl<H: HandleFrame> MessageStream<H> {
     pub fn new(frame_stream: FrameStream, incoming_frame_handler: H) -> Self {
@@ -37,7 +37,7 @@ impl<H: HandleFrame> MessageStream<H> {
     fn handle_outgoing_messages(&mut self) {
         while let Some((seqno, mut message)) = self.outgoing_messages.pop_front() {
             let result = self.frame_stream
-                .send_frame(seqno, |mut frame| track!(message.encode(frame.data())));
+                .send_frame(seqno, |frame| track!(message.encode(frame.data())));
             match result {
                 Err(e) => {
                     let event = MessageStreamEvent::Sent {
@@ -69,7 +69,7 @@ impl<H: HandleFrame> MessageStream<H> {
 
     fn handle_incoming_frames(&mut self) {
         while let Some(frame) = self.frame_stream.recv_frame() {
-            let seqno = frame.seqno;
+            let seqno = frame.seqno();
             if self.cancelled_incoming_messages.contains(&seqno) {
                 if frame.is_end_of_message() {
                     self.cancelled_incoming_messages.remove(&seqno);
@@ -80,7 +80,7 @@ impl<H: HandleFrame> MessageStream<H> {
             let result = if frame.is_error() {
                 Err(track!(ErrorKind::InvalidInput.error()).into())
             } else {
-                track!(self.incoming_frame_handler.handle_frame(frame))
+                track!(self.incoming_frame_handler.handle_frame(&frame))
             };
             match result {
                 Err(e) => {
@@ -106,7 +106,7 @@ impl<H: HandleFrame> MessageStream<H> {
     }
 }
 impl<H: HandleFrame> Stream for MessageStream<H> {
-    type Item = MessageStreamEvent<H::Future>;
+    type Item = MessageStreamEvent<H::Item>;
     type Error = Error;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {

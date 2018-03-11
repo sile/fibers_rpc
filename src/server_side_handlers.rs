@@ -172,15 +172,15 @@ impl IncomingFrameHandler {
     }
 }
 impl HandleFrame for IncomingFrameHandler {
-    type Future = Action;
+    type Item = Action;
 
-    fn handle_frame(&mut self, frame: Frame) -> Result<Option<Self::Future>> {
+    fn handle_frame(&mut self, frame: &Frame) -> Result<Option<Self::Item>> {
         debug_assert!(!frame.is_error());
 
         let mut offset = 0;
-        if !self.runnings.contains_key(&frame.seqno) {
-            debug_assert!(frame.data.len() >= 4);
-            let procedure = ProcedureId(BigEndian::read_u32(&frame.data));
+        if !self.runnings.contains_key(&frame.seqno()) {
+            debug_assert!(frame.data().len() >= 4);
+            let procedure = ProcedureId(BigEndian::read_u32(frame.data()));
             offset = 4;
 
             let factory = track_assert_some!(
@@ -189,17 +189,17 @@ impl HandleFrame for IncomingFrameHandler {
                 "Unregistered RPC: {:?}",
                 procedure
             );
-            let handler = factory.create_message_handler(frame.seqno);
-            self.runnings.insert(frame.seqno, handler);
+            let handler = factory.create_message_handler(frame.seqno());
+            self.runnings.insert(frame.seqno(), handler);
         }
 
-        let mut handler = self.runnings.remove(&frame.seqno).expect("Never fails");
-        track!(handler.handle_message(&frame.data[offset..]))?;
+        let mut handler = self.runnings.remove(&frame.seqno()).expect("Never fails");
+        track!(handler.handle_message(&frame.data()[offset..]))?;
         if frame.is_end_of_message() {
             let action = track!(handler.finish())?;
             Ok(Some(action))
         } else {
-            self.runnings.insert(frame.seqno, handler);
+            self.runnings.insert(frame.seqno(), handler);
             Ok(None)
         }
     }
