@@ -22,7 +22,7 @@ pub trait HandleCast<T: Cast>: Send + Sync + 'static {
 /// This trait allows for handling request/response RPC.
 pub trait HandleCall<T: Call>: Send + Sync + 'static {
     /// Handles a request.
-    fn handle_call(&self, request: T::Request) -> Reply<T::Response>;
+    fn handle_call(&self, request: T::Req) -> Reply<T::Res>;
 }
 
 /// A marker which represents never instantiated type.
@@ -302,8 +302,8 @@ impl<T, H, D, E> CallHandlerFactory<T, H, D, E>
 where
     T: Call,
     H: HandleCall<T>,
-    D: MakeDecoder<T::RequestDecoder>,
-    E: MakeEncoder<T::ResponseEncoder>,
+    D: MakeDecoder<T::ReqDecoder>,
+    E: MakeEncoder<T::ResEncoder>,
 {
     pub fn new(handler: H, decoder_maker: D, encoder_maker: E) -> Self {
         CallHandlerFactory {
@@ -318,8 +318,8 @@ impl<T, H, D, E> MessageHandlerFactory for CallHandlerFactory<T, H, D, E>
 where
     T: Call,
     H: HandleCall<T>,
-    D: MakeDecoder<T::RequestDecoder>,
-    E: MakeEncoder<T::ResponseEncoder>,
+    D: MakeDecoder<T::ReqDecoder>,
+    E: MakeEncoder<T::ResEncoder>,
 {
     fn create_message_handler(&self, seqno: MessageSeqNo) -> Box<HandleMessage> {
         let decoder = self.decoder_maker.make_decoder();
@@ -341,11 +341,11 @@ struct CallHandler<T, H, D, E> {
     encoder_maker: Arc<E>,
     seqno: MessageSeqNo,
 }
-impl<T, H, E> HandleMessage for CallHandler<T, H, T::RequestDecoder, E>
+impl<T, H, E> HandleMessage for CallHandler<T, H, T::ReqDecoder, E>
 where
     T: Call,
     H: HandleCall<T>,
-    E: MakeEncoder<T::ResponseEncoder>,
+    E: MakeEncoder<T::ResEncoder>,
 {
     fn handle_message(&mut self, data: &[u8], eos: bool) -> Result<()> {
         track!(self.decoder.decode(data, eos))

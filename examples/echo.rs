@@ -26,22 +26,19 @@ impl Call for EchoRpc {
     const ID: ProcedureId = ProcedureId(0);
     const NAME: &'static str = "echo";
 
-    type Request = Vec<u8>;
-    type RequestEncoder = BytesEncoder<Vec<u8>>;
-    type RequestDecoder = Vec<u8>;
+    type Req = Vec<u8>;
+    type ReqEncoder = BytesEncoder<Vec<u8>>;
+    type ReqDecoder = Vec<u8>;
 
-    type Response = Vec<u8>;
-    type ResponseEncoder = BytesEncoder<Vec<u8>>;
-    type ResponseDecoder = Vec<u8>;
+    type Res = Vec<u8>;
+    type ResEncoder = BytesEncoder<Vec<u8>>;
+    type ResDecoder = Vec<u8>;
 }
 
 #[derive(Clone)]
 struct EchoHandler;
 impl HandleCall<EchoRpc> for EchoHandler {
-    fn handle_call(
-        &self,
-        request: <EchoRpc as Call>::Request,
-    ) -> Reply<<EchoRpc as Call>::Response> {
+    fn handle_call(&self, request: <EchoRpc as Call>::Req) -> Reply<<EchoRpc as Call>::Res> {
         Reply::done(request)
     }
 }

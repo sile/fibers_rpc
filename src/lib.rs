@@ -59,34 +59,34 @@ pub trait Call: Sized + Send + Sync + 'static {
     const NAME: &'static str;
 
     /// Request message.
-    type Request;
+    type Req;
 
     /// Request message encoder.
-    type RequestEncoder: codec::Encode<Message = Self::Request> + Send + 'static;
+    type ReqEncoder: codec::Encode<Message = Self::Req> + Send + 'static;
 
     /// Request message decoder.
-    type RequestDecoder: codec::Decode<Message = Self::Request> + Send + 'static;
+    type ReqDecoder: codec::Decode<Message = Self::Req> + Send + 'static;
 
     /// Response message.
-    type Response: Send + 'static;
+    type Res: Send + 'static;
 
     /// Response message encoder.
-    type ResponseEncoder: codec::Encode<Message = Self::Response> + Send + 'static;
+    type ResEncoder: codec::Encode<Message = Self::Res> + Send + 'static;
 
     /// Response message decoder.
-    type ResponseDecoder: codec::Decode<Message = Self::Response> + Send + 'static;
+    type ResDecoder: codec::Decode<Message = Self::Res> + Send + 'static;
 
     /// Makes a new RPC client.
     fn client(
         service: &RpcClientServiceHandle,
     ) -> RpcCallClient<
         Self,
-        DefaultDecoderMaker<Self::ResponseDecoder>,
-        IntoEncoderMaker<Self::RequestEncoder>,
+        DefaultDecoderMaker<Self::ResDecoder>,
+        IntoEncoderMaker<Self::ReqEncoder>,
     >
     where
-        Self::RequestEncoder: From<Self::Request>,
-        Self::ResponseDecoder: Default,
+        Self::ReqEncoder: From<Self::Req>,
+        Self::ResDecoder: Default,
     {
         Self::client_with_codec(service, DefaultDecoderMaker::new(), IntoEncoderMaker::new())
     }
@@ -95,10 +95,10 @@ pub trait Call: Sized + Send + Sync + 'static {
     fn client_with_decoder<D>(
         service: &RpcClientServiceHandle,
         decoder_maker: D,
-    ) -> RpcCallClient<Self, D, IntoEncoderMaker<Self::RequestEncoder>>
+    ) -> RpcCallClient<Self, D, IntoEncoderMaker<Self::ReqEncoder>>
     where
-        Self::RequestEncoder: From<Self::Request>,
-        D: MakeDecoder<Self::ResponseDecoder>,
+        Self::ReqEncoder: From<Self::Req>,
+        D: MakeDecoder<Self::ResDecoder>,
     {
         Self::client_with_codec(service, decoder_maker, IntoEncoderMaker::new())
     }
@@ -107,10 +107,10 @@ pub trait Call: Sized + Send + Sync + 'static {
     fn client_with_encoder<E>(
         service: &RpcClientServiceHandle,
         encoder_maker: E,
-    ) -> RpcCallClient<Self, DefaultDecoderMaker<Self::ResponseDecoder>, E>
+    ) -> RpcCallClient<Self, DefaultDecoderMaker<Self::ResDecoder>, E>
     where
-        Self::ResponseDecoder: Default,
-        E: MakeEncoder<Self::RequestEncoder>,
+        Self::ResDecoder: Default,
+        E: MakeEncoder<Self::ReqEncoder>,
     {
         Self::client_with_codec(service, DefaultDecoderMaker::new(), encoder_maker)
     }
@@ -122,8 +122,8 @@ pub trait Call: Sized + Send + Sync + 'static {
         encoder_maker: E,
     ) -> RpcCallClient<Self, D, E>
     where
-        D: MakeDecoder<Self::ResponseDecoder>,
-        E: MakeEncoder<Self::RequestEncoder>,
+        D: MakeDecoder<Self::ResDecoder>,
+        E: MakeEncoder<Self::ReqEncoder>,
     {
         RpcCallClient::new(service, decoder_maker, encoder_maker)
     }

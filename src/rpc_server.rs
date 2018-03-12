@@ -51,8 +51,8 @@ impl RpcServerBuilder {
     where
         T: Call,
         H: HandleCall<T>,
-        T::RequestDecoder: Default,
-        T::Response: Into<T::ResponseEncoder>,
+        T::ReqDecoder: Default,
+        T::Res: Into<T::ResEncoder>,
     {
         self.call_handler_with_codec(handler, DefaultDecoderMaker::new(), IntoEncoderMaker::new())
     }
@@ -66,8 +66,8 @@ impl RpcServerBuilder {
     where
         T: Call,
         H: HandleCall<T>,
-        D: MakeDecoder<T::RequestDecoder>,
-        E: MakeEncoder<T::ResponseEncoder>,
+        D: MakeDecoder<T::ReqDecoder>,
+        E: MakeEncoder<T::ResEncoder>,
     {
         assert!(
             !self.handlers.contains_key(&T::ID),

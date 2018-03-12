@@ -65,8 +65,8 @@ pub struct RpcCallClient<'a, T, D, E> {
 impl<'a, T, D, E> RpcCallClient<'a, T, D, E>
 where
     T: Call,
-    D: MakeDecoder<T::ResponseDecoder>,
-    E: MakeEncoder<T::RequestEncoder>,
+    D: MakeDecoder<T::ResDecoder>,
+    E: MakeEncoder<T::ReqEncoder>,
 {
     pub(crate) fn new(
         service: &'a RpcClientServiceHandle,
@@ -83,7 +83,7 @@ where
         }
     }
 
-    pub fn call(&self, server: SocketAddr, request: T::Request) -> Response<T::Response> {
+    pub fn call(&self, server: SocketAddr, request: T::Req) -> Response<T::Res> {
         // TODO: self.max_concurrency
 
         let encoder = self.encoder_maker.make_encoder(request);
