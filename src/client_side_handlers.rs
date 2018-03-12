@@ -11,14 +11,45 @@ use codec::Decode;
 use frame::{Frame, HandleFrame};
 use message::MessageSeqNo;
 
+/// `Future` that represents a response from a RPC server.
+#[derive(Debug)]
+pub struct Response<T> {
+    reply_rx: oneshot::Monitor<T, Error>,
+    timeout: Option<Timeout>,
+}
+impl<T> Future for Response<T> {
+    type Item = T;
+    type Error = Error;
+
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        let item = self.reply_rx.poll().map_err(|e| {
+            track!(e.unwrap_or_else(|| {
+                ErrorKind::Other
+                    .cause("RPC response monitoring channel disconnected")
+                    .into()
+            }))
+        })?;
+        if let Async::Ready(item) = item {
+            Ok(Async::Ready(item))
+        } else {
+            let expired = self.timeout
+                .poll()
+                .map_err(|_| track!(ErrorKind::Other.cause("Broken timer")))?;
+            if let Async::Ready(Some(())) = expired {
+                track_panic!(ErrorKind::Timeout);
+            }
+            Ok(Async::NotReady)
+        }
+    }
+}
+
+#[derive(Default)]
 pub struct IncomingFrameHandler {
     handlers: HashMap<MessageSeqNo, BoxResponseHandler>,
 }
 impl IncomingFrameHandler {
     pub fn new() -> Self {
-        IncomingFrameHandler {
-            handlers: HashMap::new(),
-        }
+        Self::default()
     }
 
     pub fn register_response_handler(&mut self, seqno: MessageSeqNo, handler: BoxResponseHandler) {
@@ -92,37 +123,5 @@ impl<D: Decode> HandleFrame for ResponseHandler<D> {
     fn handle_error(&mut self, _seqno: MessageSeqNo, error: Error) {
         let reply_tx = self.reply_tx.take().expect("Never fails");
         let _ = reply_tx.exit(Err(error));
-    }
-}
-
-// TODO: rename
-#[derive(Debug)]
-pub struct Response<T> {
-    reply_rx: oneshot::Monitor<T, Error>,
-    timeout: Option<Timeout>,
-}
-impl<T> Future for Response<T> {
-    type Item = T;
-    type Error = Error;
-
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        let item = self.reply_rx.poll().map_err(|e| {
-            track!(e.unwrap_or_else(|| {
-                ErrorKind::Other
-                    .cause("RPC response monitoring channel disconnected")
-                    .into()
-            }))
-        })?;
-        if let Async::Ready(item) = item {
-            Ok(Async::Ready(item))
-        } else {
-            let expired = self.timeout
-                .poll()
-                .map_err(|_| track!(ErrorKind::Other.cause("Broken timer")))?;
-            if let Async::Ready(Some(())) = expired {
-                track_panic!(ErrorKind::Timeout);
-            }
-            Ok(Async::NotReady)
-        }
     }
 }

@@ -13,6 +13,7 @@ pub mod codec;
 pub mod client {
     //! RPC client.
 
+    pub use client_side_handlers::Response;
     pub use client_service::{RpcClientService, RpcClientServiceBuilder, RpcClientServiceHandle};
     pub use rpc_client::{RpcCallClient, RpcCastClient};
 }
@@ -27,8 +28,8 @@ use client::{RpcCallClient, RpcCastClient, RpcClientServiceHandle};
 use codec::{DefaultDecoderMaker, IntoEncoderMaker, MakeDecoder, MakeEncoder};
 
 mod client_service;
-mod client_side_channel; // TODO:
-mod client_side_handlers; // TODO:
+mod client_side_channel;
+mod client_side_handlers;
 mod error;
 mod frame;
 mod frame_stream;
