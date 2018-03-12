@@ -2,6 +2,16 @@
 name = "fibers_rpc"
 version = "0.1.0"
 authors = ["Takeru Ohta <phjgt308@gmail.com>"]
+description = "RPC library built on top of fibers crate"
+homepage = "https://github.com/sile/fibers_rpc"
+repository = "https://github.com/sile/fibers_rpc"
+readme = "README.md"
+keywords = ["rpc", "fibers"]
+license = "MIT"
+
+[badges]
+travis-ci = {repository = "sile/fibers_rpc"}
+codecov = {repository = "sile/fibers_rpc"}
 
 [dependencies]
 atomic_immut = "0.1"
