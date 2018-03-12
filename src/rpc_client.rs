@@ -17,6 +17,7 @@ pub struct RpcCastClient<'a, T, E> {
     service: &'a RpcClientServiceHandle,
     encoder_maker: E,
     max_concurrency: usize,
+    force_wakeup: bool,
     _cast: PhantomData<T>,
 }
 impl<'a, T, E> RpcCastClient<'a, T, E>
@@ -29,6 +30,7 @@ where
             service,
             encoder_maker,
             max_concurrency: DEFAULT_MAX_CONCURRENCY,
+            force_wakeup: false,
             _cast: PhantomData,
         }
     }
@@ -41,7 +43,7 @@ where
         let message = Message {
             message: OutgoingMessage::new(Some(T::ID), encoder),
             response_handler: None,
-            force_wakeup: false,
+            force_wakeup: self.force_wakeup,
         };
         self.service.send_message(server, message);
     }
@@ -57,6 +59,14 @@ impl<'a, T, E> RpcCastClient<'a, T, E> {
         self.max_concurrency = concurrency;
         self
     }
+
+    /// If `force` is `true`, RPC chanenl waiting for reconnecting will wake up immediately.
+    ///
+    /// The default value is `false`.
+    pub fn force_wakeup(&mut self, force: bool) -> &mut Self {
+        self.force_wakeup = force;
+        self
+    }
 }
 
 /// Client for request/response RPC.
@@ -67,6 +77,7 @@ pub struct RpcCallClient<'a, T, D, E> {
     encoder_maker: E,
     max_concurrency: usize,
     timeout: Option<Duration>,
+    force_wakeup: bool,
     _call: PhantomData<T>,
 }
 impl<'a, T, D, E> RpcCallClient<'a, T, D, E>
@@ -86,6 +97,7 @@ where
             encoder_maker,
             max_concurrency: DEFAULT_MAX_CONCURRENCY,
             timeout: Some(Duration::from_secs(DEFAULT_TIMEOUT_SECS)),
+            force_wakeup: false,
             _call: PhantomData,
         }
     }
@@ -101,7 +113,7 @@ where
         let message = Message {
             message: OutgoingMessage::new(Some(T::ID), encoder),
             response_handler: Some(Box::new(handler)),
-            force_wakeup: false,
+            force_wakeup: self.force_wakeup,
         };
         self.service.send_message(server, message);
         response
@@ -126,6 +138,14 @@ impl<'a, T, D, E> RpcCallClient<'a, T, D, E> {
     /// The default value is `Some(Duration::from_secs(5))`.
     pub fn timeout(&mut self, timeout: Option<Duration>) -> &mut Self {
         self.timeout = timeout;
+        self
+    }
+
+    /// If `force` is `true`, RPC chanenl waiting for reconnecting will wake up immediately.
+    ///
+    /// The default value is `false`.
+    pub fn force_wakeup(&mut self, force: bool) -> &mut Self {
+        self.force_wakeup = force;
         self
     }
 }
