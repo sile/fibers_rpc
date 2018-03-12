@@ -22,38 +22,65 @@ pub trait HandleCast<T: Cast>: Send + Sync + 'static {
 /// This trait allows for handling request/response RPC.
 pub trait HandleCall<T: Call>: Send + Sync + 'static {
     /// Handles a request.
-    fn handle_call(&self, request: T::Req) -> Reply<T::Res>;
+    fn handle_call(&self, request: T::Req) -> Reply<T>;
 }
 
 /// A marker which represents never instantiated type.
 pub struct Never(());
 
-/// `Future` that represents a reply from a RPC server.
-pub struct Reply<T> {
-    seqno: MessageSeqNo,
-    either: Either<Box<Future<Item = T, Error = Never> + Send + 'static>, Option<T>>,
+/// This represents a reply from a RPC server.
+pub struct Reply<T: Call> {
+    either: Either<Box<Future<Item = T::Res, Error = Never> + Send + 'static>, Option<T::Res>>,
 }
-impl<T> Reply<T> {
+impl<T: Call> Reply<T> {
     /// Makes a `Reply` instance which will execute `future` then reply the resulting item as the response.
     pub fn future<F>(future: F) -> Self
     where
-        F: Future<Item = T, Error = Never> + Send + 'static,
+        F: Future<Item = T::Res, Error = Never> + Send + 'static,
     {
         Reply {
-            seqno: MessageSeqNo::from_u64(0), // dummy initial value
             either: Either::A(Box::new(future)),
         }
     }
 
     /// Makes a `Reply` instance which replies the response immediately.
-    pub fn done(response: T) -> Self {
+    pub fn done(response: T::Res) -> Self {
         Reply {
-            seqno: MessageSeqNo::from_u64(0), // dummy initial value
             either: Either::B(Some(response)),
         }
     }
 
-    pub(crate) fn try_take(&mut self) -> Option<(MessageSeqNo, T)> {
+    fn boxed<F>(self, seqno: MessageSeqNo, f: F) -> BoxReply
+    where
+        F: FnOnce(T::Res) -> OutgoingMessage + Send + 'static,
+    {
+        match self.either {
+            Either::A(v) => BoxReply {
+                seqno,
+                either: Either::A(Box::new(v.map(f))),
+            },
+            Either::B(v) => BoxReply {
+                seqno,
+                either: Either::B(v.map(f)),
+            },
+        }
+    }
+}
+impl<T: Call> fmt::Debug for Reply<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Reply {{ .. }}")
+    }
+}
+
+pub struct BoxReply {
+    seqno: MessageSeqNo,
+    either: Either<
+        Box<Future<Item = OutgoingMessage, Error = Never> + Send + 'static>,
+        Option<OutgoingMessage>,
+    >,
+}
+impl BoxReply {
+    pub fn try_take(&mut self) -> Option<(MessageSeqNo, OutgoingMessage)> {
         let seqno = self.seqno;
         if let Either::B(ref mut v) = self.either {
             v.take().map(|v| (seqno, v))
@@ -61,26 +88,9 @@ impl<T> Reply<T> {
             None
         }
     }
-
-    fn into_encodable<F>(self, f: F) -> Reply<OutgoingMessage>
-    where
-        F: FnOnce(T) -> OutgoingMessage + Send + 'static,
-        T: 'static,
-    {
-        match self.either {
-            Either::A(v) => Reply {
-                seqno: self.seqno,
-                either: Either::A(Box::new(v.map(f))),
-            },
-            Either::B(v) => Reply {
-                seqno: self.seqno,
-                either: Either::B(v.map(f)),
-            },
-        }
-    }
 }
-impl<T> Future for Reply<T> {
-    type Item = (MessageSeqNo, T);
+impl Future for BoxReply {
+    type Item = (MessageSeqNo, OutgoingMessage);
     type Error = Never;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
@@ -88,18 +98,18 @@ impl<T> Future for Reply<T> {
         Ok(match self.either {
             Either::A(ref mut f) => f.poll()?.map(|v| (seqno, v)),
             Either::B(ref mut v) => {
-                Async::Ready((seqno, v.take().expect("Cannot poll Reply twice")))
+                Async::Ready((seqno, v.take().expect("Cannot poll BoxReply twice")))
             }
         })
     }
 }
-impl<T> fmt::Debug for Reply<T> {
+impl fmt::Debug for BoxReply {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Reply {{ seqno: {:?}, .. }}", self.seqno)
+        write!(f, "BoxReply {{ seqno: {:?}, .. }}", self.seqno)
     }
 }
 
-/// `Future` that represents a task for handling an RPC notification.
+/// This represents a task for handling an RPC notification.
 pub struct NoReply {
     future: Option<Box<Future<Item = (), Error = Never> + Send + 'static>>,
 }
@@ -119,16 +129,10 @@ impl NoReply {
         NoReply { future: None }
     }
 
-    pub(crate) fn is_done(&self) -> bool {
-        self.future.is_none()
-    }
-}
-impl Future for NoReply {
-    type Item = ();
-    type Error = Never;
-
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        self.future.poll().map(|x| x.map(|_| ()))
+    pub(crate) fn into_future(
+        self,
+    ) -> Option<Box<Future<Item = (), Error = Never> + Send + 'static>> {
+        self.future
     }
 }
 impl fmt::Debug for NoReply {
@@ -143,7 +147,7 @@ impl fmt::Debug for NoReply {
 
 #[derive(Debug)]
 pub enum Action {
-    Reply(Reply<OutgoingMessage>),
+    Reply(BoxReply),
     NoReply(NoReply),
 }
 impl Future for Action {
@@ -153,7 +157,7 @@ impl Future for Action {
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         Ok(match *self {
             Action::Reply(ref mut f) => f.poll()?.map(Some),
-            Action::NoReply(ref mut f) => f.poll()?.map(|_| None),
+            Action::NoReply(ref mut noreply) => noreply.future.poll()?.map(|_| None),
         })
     }
 }
@@ -352,12 +356,12 @@ where
     }
     fn finish(&mut self) -> Result<Action> {
         let request = track!(self.decoder.finish())?;
-        let mut reply = self.handler.handle_call(request);
-        reply.seqno = self.seqno;
-
         let encoder_maker = Arc::clone(&self.encoder_maker);
-        Ok(Action::Reply(reply.into_encodable(move |v| {
-            OutgoingMessage::new(None, encoder_maker.make_encoder(v))
-        })))
+        let reply = self.handler
+            .handle_call(request)
+            .boxed(self.seqno, move |v| {
+                OutgoingMessage::new(None, encoder_maker.make_encoder(v))
+            });
+        Ok(Action::Reply(reply))
     }
 }

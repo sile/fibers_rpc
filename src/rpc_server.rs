@@ -210,8 +210,8 @@ impl Future for ChannelHandler {
             if let Some(action) = action {
                 match action {
                     Action::NoReply(noreply) => {
-                        if !noreply.is_done() {
-                            self.spawner.spawn(noreply.map_err(|_: Never| ()));
+                        if let Some(future) = noreply.into_future() {
+                            self.spawner.spawn(future.map_err(|_: Never| ()));
                         }
                     }
                     Action::Reply(mut reply) => {

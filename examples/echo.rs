@@ -38,7 +38,7 @@ impl Call for EchoRpc {
 #[derive(Clone)]
 struct EchoHandler;
 impl HandleCall<EchoRpc> for EchoHandler {
-    fn handle_call(&self, request: <EchoRpc as Call>::Req) -> Reply<<EchoRpc as Call>::Res> {
+    fn handle_call(&self, request: <EchoRpc as Call>::Req) -> Reply<EchoRpc> {
         Reply::done(request)
     }
 }
