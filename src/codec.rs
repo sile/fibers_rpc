@@ -7,14 +7,18 @@ use std::mem;
 use {Error, Result};
 
 /// This trait allows for incrementally decoding an RPC message from a sequence of bytes.
-pub trait Decode<T> {
+pub trait Decode {
+    /// Message to be decoded.
+    type Message;
+
     /// Proceeds decoding by consuming the given fragment of a byte sequence.
     fn decode(&mut self, buf: &[u8], eos: bool) -> Result<()>;
 
     /// Finishes decoding and returns the resulting message.
-    fn finish(&mut self) -> Result<T>;
+    fn finish(&mut self) -> Result<Self::Message>;
 }
-impl Decode<Vec<u8>> for Vec<u8> {
+impl Decode for Vec<u8> {
+    type Message = Vec<u8>;
     fn decode(&mut self, buf: &[u8], _eos: bool) -> Result<()> {
         self.extend_from_slice(buf);
         Ok(())
@@ -36,7 +40,9 @@ pub struct SelfDecoder<T> {
     buf: Vec<u8>,
     message: Option<T>,
 }
-impl<T: DecodeFrom> Decode<T> for SelfDecoder<T> {
+impl<T: DecodeFrom> Decode for SelfDecoder<T> {
+    type Message = T;
+
     fn decode(&mut self, buf: &[u8], eos: bool) -> Result<()> {
         if self.buf.is_empty() && eos {
             self.message = Some(track!(T::decode_from(buf))?);
@@ -63,14 +69,19 @@ impl<T> Default for SelfDecoder<T> {
 }
 
 /// This trait allows for incrementally encoding an RPC message to a sequence of bytes.
-pub trait Encode<T> {
+pub trait Encode {
+    /// Message to be encoded.
+    type Message;
+
     /// Proceeds encoding by writing the part of the resulting byte sequence to the given buffer.
     ///
     /// It returns the size of the written bytes.
     /// If the size is less than `buf.len()`, it means the encoding process completed.
     fn encode(&mut self, buf: &mut [u8]) -> Result<usize>;
 }
-impl<T: AsRef<[u8]>> Encode<T> for Cursor<T> {
+impl<T: AsRef<[u8]>> Encode for Cursor<T> {
+    type Message = T;
+
     fn encode(&mut self, buf: &mut [u8]) -> Result<usize> {
         track!(self.read(buf).map_err(Error::from))
     }
@@ -88,7 +99,9 @@ pub struct SelfEncoder<T> {
     buf: BytesEncoder<Vec<u8>>,
     message: Option<T>,
 }
-impl<T: EncodeTo> Encode<T> for SelfEncoder<T> {
+impl<T: EncodeTo> Encode for SelfEncoder<T> {
+    type Message = T;
+
     fn encode(&mut self, buf: &mut [u8]) -> Result<usize> {
         if let Some(t) = self.message.take() {
             let mut temp = TempBuf::new(buf);
@@ -132,7 +145,9 @@ impl<T: AsRef<[u8]>> From<T> for BytesEncoder<T> {
         }
     }
 }
-impl<T: AsRef<[u8]>> Encode<T> for BytesEncoder<T> {
+impl<T: AsRef<[u8]>> Encode for BytesEncoder<T> {
+    type Message = T;
+
     fn encode(&mut self, buf: &mut [u8]) -> Result<usize> {
         let size = cmp::min(buf.len(), self.bytes.as_ref().len() - self.offset);
         (&mut buf[..size]).copy_from_slice(&self.bytes.as_ref()[self.offset..self.offset + size]);
@@ -170,35 +185,35 @@ impl<D> Default for DefaultDecoderMaker<D> {
 }
 
 /// This trait allows for making encoder instances.
-pub trait MakeEncoder<T, E>: Send + Sync + 'static
+pub trait MakeEncoder<E>: Send + Sync + 'static
 where
-    E: Encode<T>,
+    E: Encode,
 {
     /// Makes a encoder instance for encoding the given RPC message.
-    fn make_encoder(&self, message: T) -> E;
+    fn make_encoder(&self, message: E::Message) -> E;
 }
 
-/// An implementation of `MakeEncoder` trait which makes `E` encoders from `T` messages by using `T::into()`.
+/// An implementation of `MakeEncoder` trait which makes `E` encoders by using `E::Message::into()`.
 #[derive(Debug)]
-pub struct IntoEncoderMaker<T, E>(PhantomData<(T, E)>);
-impl<T, E> IntoEncoderMaker<T, E> {
+pub struct IntoEncoderMaker<E>(PhantomData<E>);
+impl<E> IntoEncoderMaker<E> {
     /// Makes a new `IntoEncoderMaker` instance.
     pub fn new() -> Self {
         IntoEncoderMaker(PhantomData)
     }
 }
-unsafe impl<T, E> Sync for IntoEncoderMaker<T, E> {}
-unsafe impl<T, E> Send for IntoEncoderMaker<T, E> {}
-impl<T, E> MakeEncoder<T, E> for IntoEncoderMaker<T, E>
+unsafe impl<E> Sync for IntoEncoderMaker<E> {}
+unsafe impl<E> Send for IntoEncoderMaker<E> {}
+impl<E> MakeEncoder<E> for IntoEncoderMaker<E>
 where
-    E: Encode<T> + 'static,
-    T: Into<E> + 'static,
+    E: Encode + 'static,
+    E::Message: Into<E> + 'static,
 {
-    fn make_encoder(&self, message: T) -> E {
+    fn make_encoder(&self, message: E::Message) -> E {
         message.into()
     }
 }
-impl<T, E> Default for IntoEncoderMaker<T, E> {
+impl<E> Default for IntoEncoderMaker<E> {
     fn default() -> Self {
         Self::new()
     }

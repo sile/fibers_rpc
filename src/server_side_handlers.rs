@@ -303,7 +303,7 @@ where
     T: Call,
     H: HandleCall<T>,
     D: MakeDecoder<T::RequestDecoder>,
-    E: MakeEncoder<T::Response, T::ResponseEncoder>,
+    E: MakeEncoder<T::ResponseEncoder>,
 {
     pub fn new(handler: H, decoder_maker: D, encoder_maker: E) -> Self {
         CallHandlerFactory {
@@ -319,7 +319,7 @@ where
     T: Call,
     H: HandleCall<T>,
     D: MakeDecoder<T::RequestDecoder>,
-    E: MakeEncoder<T::Response, T::ResponseEncoder>,
+    E: MakeEncoder<T::ResponseEncoder>,
 {
     fn create_message_handler(&self, seqno: MessageSeqNo) -> Box<HandleMessage> {
         let decoder = self.decoder_maker.make_decoder();
@@ -345,7 +345,7 @@ impl<T, H, E> HandleMessage for CallHandler<T, H, T::RequestDecoder, E>
 where
     T: Call,
     H: HandleCall<T>,
-    E: MakeEncoder<T::Response, T::ResponseEncoder>,
+    E: MakeEncoder<T::ResponseEncoder>,
 {
     fn handle_message(&mut self, data: &[u8], eos: bool) -> Result<()> {
         track!(self.decoder.decode(data, eos))

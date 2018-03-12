@@ -40,9 +40,9 @@ pub struct OutgoingMessage {
     encode: Box<FnMut(&mut [u8]) -> Result<usize> + Send + 'static>,
 }
 impl OutgoingMessage {
-    pub fn new<T, E>(id: Option<ProcedureId>, mut encoder: E) -> Self
+    pub fn new<E>(id: Option<ProcedureId>, mut encoder: E) -> Self
     where
-        E: Encode<T> + Send + 'static,
+        E: Encode + Send + 'static,
     {
         OutgoingMessage {
             id,

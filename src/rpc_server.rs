@@ -67,7 +67,7 @@ impl RpcServerBuilder {
         T: Call,
         H: HandleCall<T>,
         D: MakeDecoder<T::RequestDecoder>,
-        E: MakeEncoder<T::Response, T::ResponseEncoder>,
+        E: MakeEncoder<T::ResponseEncoder>,
     {
         assert!(
             !self.handlers.contains_key(&T::ID),

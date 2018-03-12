@@ -22,7 +22,7 @@ pub struct RpcCastClient<'a, T, E> {
 impl<'a, T, E> RpcCastClient<'a, T, E>
 where
     T: Cast,
-    E: MakeEncoder<T::Notification, T::Encoder>,
+    E: MakeEncoder<T::Encoder>,
 {
     pub(crate) fn new(service: &'a RpcClientServiceHandle, encoder_maker: E) -> Self {
         RpcCastClient {
@@ -66,7 +66,7 @@ impl<'a, T, D, E> RpcCallClient<'a, T, D, E>
 where
     T: Call,
     D: MakeDecoder<T::ResponseDecoder>,
-    E: MakeEncoder<T::Request, T::RequestEncoder>,
+    E: MakeEncoder<T::RequestEncoder>,
 {
     pub(crate) fn new(
         service: &'a RpcClientServiceHandle,
