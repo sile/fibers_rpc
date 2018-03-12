@@ -28,9 +28,11 @@ pub trait HandleCall<T: Call>: Send + Sync + 'static {
 /// A marker which represents never instantiated type.
 pub struct Never(());
 
+type BoxResponseFuture<T> = Box<Future<Item = T, Error = Never> + Send + 'static>;
+
 /// This represents a reply from a RPC server.
 pub struct Reply<T: Call> {
-    either: Either<Box<Future<Item = T::Res, Error = Never> + Send + 'static>, Option<T::Res>>,
+    either: Either<BoxResponseFuture<T::Res>, Option<T::Res>>,
 }
 impl<T: Call> Reply<T> {
     /// Makes a `Reply` instance which will execute `future` then reply the resulting item as the response.
@@ -178,6 +180,7 @@ impl IncomingFrameHandler {
 impl HandleFrame for IncomingFrameHandler {
     type Item = Action;
 
+    #[cfg_attr(feature = "cargo-clippy", allow(map_entry))]
     fn handle_frame(&mut self, frame: &Frame) -> Result<Option<Self::Item>> {
         debug_assert!(!frame.is_error());
 

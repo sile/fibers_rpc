@@ -61,7 +61,8 @@ impl HandleFrame for IncomingFrameHandler {
     fn handle_frame(&mut self, frame: &Frame) -> Result<Option<Self::Item>> {
         let seqno = frame.seqno();
         if let Some(mut handler) = self.handlers.remove(&seqno) {
-            if track!(handler.handle_frame(frame))?.is_some() {
+            let eos = track!(handler.handle_frame(frame))?.is_some();
+            if eos {
                 Ok(Some(()))
             } else {
                 self.handlers.insert(seqno, handler);
@@ -102,7 +103,7 @@ impl<D: Decode> ResponseHandler<D> {
             reply_tx: Some(reply_tx),
         };
 
-        let timeout = timeout.map(|d| timer::timeout(d));
+        let timeout = timeout.map(timer::timeout);
         let response = Response { reply_rx, timeout };
         (handler, response)
     }
@@ -114,7 +115,7 @@ impl<D: Decode> HandleFrame for ResponseHandler<D> {
         if frame.is_end_of_message() {
             let response = track!(self.decoder.finish())?;
             let reply_tx = self.reply_tx.take().expect("Never fails");
-            let _ = reply_tx.exit(Ok(response));
+            reply_tx.exit(Ok(response));
             Ok(Some(()))
         } else {
             Ok(None)
@@ -122,6 +123,6 @@ impl<D: Decode> HandleFrame for ResponseHandler<D> {
     }
     fn handle_error(&mut self, _seqno: MessageSeqNo, error: Error) {
         let reply_tx = self.reply_tx.take().expect("Never fails");
-        let _ = reply_tx.exit(Err(error));
+        reply_tx.exit(Err(error));
     }
 }

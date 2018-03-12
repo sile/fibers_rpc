@@ -110,7 +110,8 @@ impl<H: HandleFrame> Stream for MessageStream<H> {
     type Error = Error;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        if track!(self.frame_stream.poll())?.is_ready() {
+        let eos = track!(self.frame_stream.poll())?.is_ready();
+        if eos {
             return Ok(Async::Ready(None));
         }
 

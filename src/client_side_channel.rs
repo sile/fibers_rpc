@@ -83,7 +83,8 @@ impl ClientSideChannel {
     fn poll_message_stream(&mut self) -> Result<Async<Option<MessageStreamState>>> {
         match self.message_stream {
             MessageStreamState::Wait { ref mut timeout } => {
-                if track!(timeout.poll().map_err(from_timeout_error))?.is_ready() {
+                let is_expired = track!(timeout.poll().map_err(from_timeout_error))?.is_ready();
+                if is_expired {
                     info!(
                         self.logger,
                         "Reconnecting timeout expired; starts reconnecting"
@@ -164,7 +165,8 @@ impl Future for ClientSideChannel {
     type Item = ();
     type Error = Error;
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        if track!(self.keep_alive.poll())?.is_ready() {
+        let is_timeout = track!(self.keep_alive.poll())?.is_ready();
+        if is_timeout {
             return Ok(Async::Ready(()));
         }
         while let Async::Ready(next) = track!(self.poll_message_stream())? {
@@ -176,6 +178,7 @@ impl Future for ClientSideChannel {
     }
 }
 
+#[cfg_attr(feature = "cargo-clippy", allow(large_enum_variant))]
 #[derive(Debug)]
 enum MessageStreamState {
     Wait {
