@@ -57,12 +57,51 @@ impl RpcServerBuilder {
         self.call_handler_with_codec(handler, DefaultDecoderMaker::new(), IntoEncoderMaker::new())
     }
 
+    /// Registers a handler (with the given decoder maker) for the request/response RPC.
+    ///
+    /// This equivalent to `call_handler_with_codec(handler, decoder_maker, IntoEncoderMaker::new())`.
+    ///
+    /// # Panices
+    ///
+    /// If a procedure which has `T::ID` already have been registered, the calling thread will panic.
+    pub fn call_handler_with_decoder<T, H, D>(self, handler: H, decoder_maker: D) -> Self
+    where
+        T: Call,
+        H: HandleCall<T>,
+        D: MakeDecoder<T::ReqDecoder>,
+        T::Res: Into<T::ResEncoder>,
+    {
+        self.call_handler_with_codec(handler, decoder_maker, IntoEncoderMaker::new())
+    }
+
+    /// Registers a handler (with the given encoder maker) for the request/response RPC.
+    ///
+    /// This equivalent to `call_handler_with_codec(handler, DefaultDecoderMaker::new(), encoder_maker)`.
+    ///
+    /// # Panices
+    ///
+    /// If a procedure which has `T::ID` already have been registered, the calling thread will panic.
+    pub fn call_handler_with_encoder<T, H, E>(self, handler: H, encoder_maker: E) -> Self
+    where
+        T: Call,
+        H: HandleCall<T>,
+        E: MakeEncoder<T::ResEncoder>,
+        T::ReqDecoder: Default,
+    {
+        self.call_handler_with_codec(handler, DefaultDecoderMaker::new(), encoder_maker)
+    }
+
     /// Registers a handler (with the given decoder/encoder makers) for the request/response RPC.
     ///
     /// # Panices
     ///
     /// If a procedure which has `T::ID` already have been registered, the calling thread will panic.
-    pub fn call_handler_with_codec<T, H, D, E>(mut self, handler: H, decoder: D, encoder: E) -> Self
+    pub fn call_handler_with_codec<T, H, D, E>(
+        mut self,
+        handler: H,
+        decoder_maker: D,
+        encoder_maker: E,
+    ) -> Self
     where
         T: Call,
         H: HandleCall<T>,
@@ -76,14 +115,14 @@ impl RpcServerBuilder {
             T::NAME
         );
 
-        let handler = CallHandlerFactory::new(handler, decoder, encoder);
+        let handler = CallHandlerFactory::new(handler, decoder_maker, encoder_maker);
         self.handlers.insert(T::ID, Box::new(handler));
         self
     }
 
     /// Registers a handler for the notification RPC.
     ///
-    /// This equivalent to `cast_handler_with_codec(handler, DefaultDecoderMaker::new())`.
+    /// This equivalent to `cast_handler_with_encoder(handler, DefaultDecoderMaker::new())`.
     ///
     /// # Panices
     ///
@@ -94,7 +133,7 @@ impl RpcServerBuilder {
         H: HandleCast<T>,
         T::Decoder: Default,
     {
-        self.cast_handler_with_codec(handler, DefaultDecoderMaker::new())
+        self.cast_handler_with_decoder(handler, DefaultDecoderMaker::new())
     }
 
     /// Registers a handler (with the given decoder maker) for the notification RPC.
@@ -102,13 +141,12 @@ impl RpcServerBuilder {
     /// # Panices
     ///
     /// If a procedure which has `T::ID` already have been registered, the calling thread will panic.
-    pub fn cast_handler_with_codec<T, H, D>(mut self, handler: H, decoder: D) -> Self
+    pub fn cast_handler_with_decoder<T, H, D>(mut self, handler: H, decoder_maker: D) -> Self
     where
         T: Cast,
         H: HandleCast<T>,
         D: MakeDecoder<T::Decoder>,
     {
-        // TODO: rename
         assert!(
             !self.handlers.contains_key(&T::ID),
             "RPC registration conflicts: procedure={:?}, name={:?}",
@@ -116,7 +154,7 @@ impl RpcServerBuilder {
             T::NAME
         );
 
-        let handler = CastHandlerFactory::new(handler, decoder);
+        let handler = CastHandlerFactory::new(handler, decoder_maker);
         self.handlers.insert(T::ID, Box::new(handler));
         self
     }
