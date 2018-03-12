@@ -108,6 +108,7 @@ impl RpcServerBuilder {
         H: HandleCast<T>,
         D: MakeDecoder<T::Decoder>,
     {
+        // TODO: rename
         assert!(
             !self.handlers.contains_key(&T::ID),
             "RPC registration conflicts: procedure={:?}, name={:?}",

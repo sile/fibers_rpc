@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use std::fmt;
+use std::time::Duration;
 use fibers::sync::oneshot;
-use futures::{Future, Poll};
+use fibers::time::timer::{self, Timeout};
+use futures::{Async, Future, Poll};
 use trackable::error::ErrorKindExt;
 
 use {Error, ErrorKind, Result};
@@ -62,13 +64,15 @@ pub struct ResponseHandler<T, D> {
     reply_tx: Option<oneshot::Monitored<T, Error>>,
 }
 impl<T, D: Decode<T>> ResponseHandler<T, D> {
-    pub fn new(decoder: D) -> (Self, Response<T>) {
+    pub fn new(decoder: D, timeout: Option<Duration>) -> (Self, Response<T>) {
         let (reply_tx, reply_rx) = oneshot::monitor();
         let handler = ResponseHandler {
             decoder,
             reply_tx: Some(reply_tx),
         };
-        let response = Response { reply_rx };
+
+        let timeout = timeout.map(|d| timer::timeout(d));
+        let response = Response { reply_rx, timeout };
         (handler, response)
     }
 }
@@ -91,21 +95,34 @@ impl<T, D: Decode<T>> HandleFrame for ResponseHandler<T, D> {
     }
 }
 
+// TODO: rename
 #[derive(Debug)]
 pub struct Response<T> {
     reply_rx: oneshot::Monitor<T, Error>,
+    timeout: Option<Timeout>,
 }
 impl<T> Future for Response<T> {
     type Item = T;
     type Error = Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        self.reply_rx.poll().map_err(|e| {
+        let item = self.reply_rx.poll().map_err(|e| {
             track!(e.unwrap_or_else(|| {
                 ErrorKind::Other
                     .cause("RPC response monitoring channel disconnected")
                     .into()
             }))
-        })
+        })?;
+        if let Async::Ready(item) = item {
+            Ok(Async::Ready(item))
+        } else {
+            let expired = self.timeout
+                .poll()
+                .map_err(|_| track!(ErrorKind::Other.cause("Broken timer")))?;
+            if let Async::Ready(Some(())) = expired {
+                track_panic!(ErrorKind::Timeout);
+            }
+            Ok(Async::NotReady)
+        }
     }
 }

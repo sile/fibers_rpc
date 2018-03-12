@@ -25,6 +25,9 @@ pub enum ErrorKind {
     /// RPC server is temporarily unavailable.
     Unavailable,
 
+    /// Request timed out.
+    Timeout,
+
     /// Other errors.
     Other,
 }

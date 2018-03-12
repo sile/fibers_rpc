@@ -12,7 +12,6 @@ use Error;
 use client_side_channel::ClientSideChannel;
 use client_side_handlers::BoxResponseHandler;
 use message::OutgoingMessage;
-use rpc_client::RpcClient;
 
 #[derive(Debug)]
 pub struct RpcClientServiceBuilder {
@@ -53,12 +52,11 @@ pub struct RpcClientService {
     channels: Arc<AtomicImmut<HashMap<SocketAddr, RpcChannelHandle>>>,
 }
 impl RpcClientService {
-    pub fn client(&self) -> RpcClient {
-        let handle = RpcClientServiceHandle {
+    pub fn handle(&self) -> RpcClientServiceHandle {
+        RpcClientServiceHandle {
             command_tx: self.command_tx.clone(),
             channels: Arc::clone(&self.channels),
-        };
-        RpcClient { service: handle }
+        }
     }
 
     fn handle_command(&mut self, command: Command) {

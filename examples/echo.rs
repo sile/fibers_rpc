@@ -6,8 +6,9 @@ extern crate sloggers;
 #[macro_use]
 extern crate trackable;
 
-use std::net::ToSocketAddrs;
 use std::io::{self, Read, Write};
+use std::net::ToSocketAddrs;
+use std::time::Duration;
 use clap::{App, Arg, SubCommand};
 use fibers::{Executor, InPlaceExecutor, Spawn};
 use fibers_rpc::{Call, ProcedureId};
@@ -61,7 +62,14 @@ fn main() {
                 .possible_values(&["debug", "info", "warning", "error"]),
         )
         .subcommand(SubCommand::with_name("server"))
-        .subcommand(SubCommand::with_name("client"))
+        .subcommand(
+            SubCommand::with_name("client").arg(
+                Arg::with_name("TIMEOUT")
+                    .long("timeout")
+                    .takes_value(true)
+                    .default_value("5000"),
+            ),
+        )
         .get_matches();
 
     let addr = track_try_unwrap!(
@@ -88,11 +96,15 @@ fn main() {
         let fiber = executor.spawn_monitor(server);
         let _ = track_try_unwrap!(executor.run_fiber(fiber).map_err(Failure::from_error))
             .map_err(|e| panic!("{}", e));
-    } else if let Some(_matches) = matches.subcommand_matches("client") {
+    } else if let Some(matches) = matches.subcommand_matches("client") {
+        let timeout = Duration::from_millis(track_try_unwrap!(track_any_err!(
+            matches.value_of("TIMEOUT").unwrap().parse()
+        )));
+
         let service = RpcClientServiceBuilder::new()
             .logger(logger)
             .finish(executor.handle());
-        let client = service.client();
+        let client_service = service.handle();
         executor.spawn(service.map_err(|e| panic!("{}", e)));
 
         let mut buf = Vec::new();
@@ -102,7 +114,9 @@ fn main() {
                 .map_err(Failure::from_error)
         );
 
-        let future = client.call::<EchoRpc>(addr, buf);
+        let future = EchoRpc::client(&client_service)
+            .timeout(Some(timeout))
+            .call(addr, buf);
         let result = track_try_unwrap!(executor.run_future(future).map_err(Failure::from_error));
         let response = track_try_unwrap!(result);
         let _ = std::io::stdout().write(&response);
