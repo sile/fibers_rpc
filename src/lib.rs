@@ -1,3 +1,67 @@
+//! RPC library built on top of [fibers] crate.
+//!
+//!
+//! [fibers]: https://github.com/dwango/fibers-rs
+//!
+//! # Examples
+//!
+//! Simple echo RPC server:
+//!
+//! ```
+//! # extern crate fibers;
+//! # extern crate fibers_rpc;
+//! # extern crate futures;
+//! # fn main() {
+//! use fibers::{Executor, InPlaceExecutor, Spawn};
+//! use fibers_rpc::{Call, ProcedureId};
+//! use fibers_rpc::client::RpcClientServiceBuilder;
+//! use fibers_rpc::codec::BytesEncoder;
+//! use fibers_rpc::server::{HandleCall, Reply, RpcServerBuilder};
+//! use futures::Future;
+//!
+//! // RPC definition
+//! struct EchoRpc;
+//! impl Call for EchoRpc {
+//!     const ID: ProcedureId = ProcedureId(0);
+//!     const NAME: &'static str = "echo";
+//!
+//!     type Req = Vec<u8>;
+//!     type ReqEncoder = BytesEncoder<Vec<u8>>;
+//!     type ReqDecoder = Vec<u8>;
+//!
+//!     type Res = Vec<u8>;
+//!     type ResEncoder = BytesEncoder<Vec<u8>>;
+//!     type ResDecoder = Vec<u8>;
+//! }
+//!
+//! // Executor
+//! let mut executor = InPlaceExecutor::new().unwrap();
+//!
+//! // RPC server
+//! struct EchoHandler;
+//! impl HandleCall<EchoRpc> for EchoHandler {
+//!     fn handle_call(&self, request: <EchoRpc as Call>::Req) -> Reply<EchoRpc> {
+//!         Reply::done(request)
+//!     }
+//! }
+//! let server_addr = "127.0.0.1:1919".parse().unwrap();
+//! let server = RpcServerBuilder::new(server_addr)
+//!     .call_handler(EchoHandler)
+//!     .finish(executor.handle());
+//! executor.spawn(server.map_err(|e| panic!("{}", e)));
+//!
+//! // RPC client
+//! let service = RpcClientServiceBuilder::new().finish(executor.handle());
+//!
+//! let request = Vec::from(&b"hello"[..]);
+//! let response = EchoRpc::client(&service.handle()).call(server_addr, request.clone());
+//!
+//! executor.spawn(service.map_err(|e| panic!("{}", e)));
+//! let result = executor.run_future(response).unwrap();
+//! assert_eq!(result.ok(), Some(request));
+//! # }
+//! ```
+#![warn(missing_docs)]
 extern crate atomic_immut;
 extern crate byteorder;
 extern crate fibers;
@@ -168,5 +232,60 @@ pub trait Cast: Sized + Sync + Send + 'static {
         E: MakeEncoder<Self::Encoder>,
     {
         RpcCastClient::new(service, encoder_maker)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use fibers::{Executor, InPlaceExecutor, Spawn};
+    use futures::Future;
+
+    use {Call, ProcedureId};
+    use client::RpcClientServiceBuilder;
+    use codec::BytesEncoder;
+    use server::{HandleCall, Reply, RpcServerBuilder};
+
+    #[test]
+    fn it_works() {
+        // RPC
+        struct EchoRpc;
+        impl Call for EchoRpc {
+            const ID: ProcedureId = ProcedureId(0);
+            const NAME: &'static str = "echo";
+
+            type Req = Vec<u8>;
+            type ReqEncoder = BytesEncoder<Vec<u8>>;
+            type ReqDecoder = Vec<u8>;
+
+            type Res = Vec<u8>;
+            type ResEncoder = BytesEncoder<Vec<u8>>;
+            type ResDecoder = Vec<u8>;
+        }
+
+        // Executor
+        let mut executor = track_try_unwrap!(track_any_err!(InPlaceExecutor::new()));
+
+        // Server
+        struct EchoHandler;
+        impl HandleCall<EchoRpc> for EchoHandler {
+            fn handle_call(&self, request: <EchoRpc as Call>::Req) -> Reply<EchoRpc> {
+                Reply::done(request)
+            }
+        }
+        let server_addr = "127.0.0.1:1919".parse().unwrap();
+        let server = RpcServerBuilder::new(server_addr)
+            .call_handler(EchoHandler)
+            .finish(executor.handle());
+        executor.spawn(server.map_err(|e| panic!("{}", e)));
+
+        // Client
+        let service = RpcClientServiceBuilder::new().finish(executor.handle());
+
+        let request = Vec::from(&b"hello"[..]);
+        let response = EchoRpc::client(&service.handle()).call(server_addr, request.clone());
+
+        executor.spawn(service.map_err(|e| panic!("{}", e)));
+        let result = track_try_unwrap!(track_any_err!(executor.run_future(response)));
+        assert_eq!(result.ok(), Some(request));
     }
 }

@@ -33,6 +33,7 @@ where
         }
     }
 
+    /// Sends the notification message to the RPC server.
     pub fn cast(&self, server: SocketAddr, notification: T::Notification) {
         // TODO: self.max_concurrency
 
@@ -46,6 +47,12 @@ where
     }
 }
 impl<'a, T, E> RpcCastClient<'a, T, E> {
+    /// Sets the maximum concurrency of the RPC channel between the client service and the server.
+    ///
+    /// If the channel has ongoing messages more than `concurrency`,
+    /// the RPC will fail with `ErrorKind::Unavailable` error.
+    ///
+    /// The default value is `4096`.
     pub fn max_concurrency(&mut self, concurrency: usize) -> &mut Self {
         self.max_concurrency = concurrency;
         self
@@ -83,6 +90,8 @@ where
         }
     }
 
+    /// Sends the request message to the RPC server,
+    /// and returns a future that represents the response from the server.
     pub fn call(&self, server: SocketAddr, request: T::Req) -> Response<T::Res> {
         // TODO: self.max_concurrency
 
@@ -99,11 +108,22 @@ where
     }
 }
 impl<'a, T, D, E> RpcCallClient<'a, T, D, E> {
+    /// Sets the maximum concurrency of the RPC channel between the client service and the server.
+    ///
+    /// If the channel has ongoing messages more than `concurrency`,
+    /// the RPC will fail with `ErrorKind::Unavailable` error.
+    ///
+    /// The default value is `4096`.
     pub fn max_concurrency(&mut self, concurrency: usize) -> &mut Self {
         self.max_concurrency = concurrency;
         self
     }
 
+    /// Sets the timeout of the RPC request.
+    ///
+    /// `None` means there is no timeout.
+    ///
+    /// The default value is `Some(Duration::from_secs(5))`.
     pub fn timeout(&mut self, timeout: Option<Duration>) -> &mut Self {
         self.timeout = timeout;
         self

@@ -35,7 +35,6 @@ impl Call for EchoRpc {
     type ResDecoder = Vec<u8>;
 }
 
-#[derive(Clone)]
 struct EchoHandler;
 impl HandleCall<EchoRpc> for EchoHandler {
     fn handle_call(&self, request: <EchoRpc as Call>::Req) -> Reply<EchoRpc> {

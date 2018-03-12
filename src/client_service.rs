@@ -48,6 +48,7 @@ impl RpcClientServiceBuilder {
         self
     }
 
+    /// Builds a new `RpcClientService` instance.
     pub fn finish<S>(&self, spawner: S) -> RpcClientService
     where
         S: Spawn + Send + 'static,
