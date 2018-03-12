@@ -16,6 +16,8 @@ use frame_stream::FrameStream;
 use message::{MessageSeqNo, OutgoingMessage};
 use message_stream::{MessageStream, MessageStreamEvent};
 
+pub const DEFAULT_KEEP_ALIVE_TIMEOUT_SECS: u64 = 60 * 10;
+
 #[derive(Debug)]
 pub struct ClientSideChannel {
     logger: Logger,
@@ -30,11 +32,15 @@ impl ClientSideChannel {
         ClientSideChannel {
             logger,
             server,
-            keep_alive: KeepAlive::new(Duration::from_secs(60 * 10)),
+            keep_alive: KeepAlive::new(Duration::from_secs(DEFAULT_KEEP_ALIVE_TIMEOUT_SECS)),
             next_seqno: MessageSeqNo::new_client_side_seqno(),
             message_stream: MessageStreamState::new(server),
             exponential_backoff: ExponentialBackoff::new(),
         }
+    }
+
+    pub fn set_keep_alive_timeout(&mut self, duration: Duration) {
+        self.keep_alive = KeepAlive::new(duration);
     }
 
     pub fn send_message(
@@ -59,6 +65,21 @@ impl ClientSideChannel {
         }
     }
 
+    fn wait_or_reconnect(
+        server: SocketAddr,
+        backoff: &mut ExponentialBackoff,
+    ) -> MessageStreamState {
+        if let Some(timeout) = backoff.timeout() {
+            MessageStreamState::Wait { timeout }
+        } else {
+            backoff.next();
+            MessageStreamState::Connecting {
+                buffer: Vec::new(),
+                future: TcpStream::connect(server),
+            }
+        }
+    }
+
     fn poll_message_stream(&mut self) -> Result<Async<Option<MessageStreamState>>> {
         match self.message_stream {
             MessageStreamState::Wait { ref mut timeout } => {
@@ -80,72 +101,39 @@ impl ClientSideChannel {
             MessageStreamState::Connecting {
                 ref mut future,
                 ref mut buffer,
-            } => {
-                match track!(future.poll().map_err(Error::from)) {
-                    Err(e) => {
-                        error!(self.logger, "Failed to TCP connect: {}", e);
-                        // TODO: 共通化
-                        let next = if let Some(timeout) = self.exponential_backoff.timeout() {
-                            MessageStreamState::Wait { timeout }
-                        } else {
-                            self.exponential_backoff.next();
-                            MessageStreamState::Connecting {
-                                buffer: Vec::new(),
-                                future: TcpStream::connect(self.server),
-                            }
-                        };
-                        Ok(Async::Ready(Some(next)))
-                    }
-                    Ok(Async::NotReady) => Ok(Async::NotReady),
-                    Ok(Async::Ready(stream)) => {
-                        info!(
-                            self.logger,
-                            "TCP connected: stream={:?}, buffer.len={}",
-                            stream,
-                            buffer.len()
-                        );
-                        let stream = FrameStream::new(stream);
-                        let mut stream = MessageStream::new(stream, IncomingFrameHandler::new());
-                        for m in buffer.drain(..) {
-                            // TODO: 共通化
-                            stream.send_message(m.seqno, m.message);
-                            if let Some(handler) = m.handler {
-                                stream
-                                    .incoming_frame_handler_mut()
-                                    .register_response_handler(m.seqno, handler);
-                            }
-                        }
-                        let next = MessageStreamState::Connected { stream };
-                        Ok(Async::Ready(Some(next)))
-                    }
+            } => match track!(future.poll().map_err(Error::from)) {
+                Err(e) => {
+                    error!(self.logger, "Failed to TCP connect: {}", e);
+                    let next = Self::wait_or_reconnect(self.server, &mut self.exponential_backoff);
+                    Ok(Async::Ready(Some(next)))
                 }
-            }
+                Ok(Async::NotReady) => Ok(Async::NotReady),
+                Ok(Async::Ready(stream)) => {
+                    info!(
+                        self.logger,
+                        "TCP connected: stream={:?}, buffer.len={}",
+                        stream,
+                        buffer.len()
+                    );
+                    let stream =
+                        MessageStream::new(FrameStream::new(stream), IncomingFrameHandler::new());
+                    let mut connected = MessageStreamState::Connected { stream };
+                    for m in buffer.drain(..) {
+                        connected.send_message(m.seqno, m.message, m.handler);
+                    }
+                    Ok(Async::Ready(Some(connected)))
+                }
+            },
             MessageStreamState::Connected { ref mut stream } => match track!(stream.poll()) {
                 Err(e) => {
                     error!(self.logger, "Message stream aborted: {}", e);
-                    let next = if let Some(timeout) = self.exponential_backoff.timeout() {
-                        MessageStreamState::Wait { timeout }
-                    } else {
-                        self.exponential_backoff.next();
-                        MessageStreamState::Connecting {
-                            buffer: Vec::new(),
-                            future: TcpStream::connect(self.server),
-                        }
-                    };
+                    let next = Self::wait_or_reconnect(self.server, &mut self.exponential_backoff);
                     Ok(Async::Ready(Some(next)))
                 }
                 Ok(Async::NotReady) => Ok(Async::NotReady),
                 Ok(Async::Ready(None)) => {
                     warn!(self.logger, "Message stream terminated");
-                    let next = if let Some(timeout) = self.exponential_backoff.timeout() {
-                        MessageStreamState::Wait { timeout }
-                    } else {
-                        self.exponential_backoff.next();
-                        MessageStreamState::Connecting {
-                            buffer: Vec::new(),
-                            future: TcpStream::connect(self.server),
-                        }
-                    };
+                    let next = Self::wait_or_reconnect(self.server, &mut self.exponential_backoff);
                     Ok(Async::Ready(Some(next)))
                 }
                 Ok(Async::Ready(Some(event))) => {

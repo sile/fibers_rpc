@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 use slog::{Discard, Logger};
 use atomic_immut::AtomicImmut;
 use fibers::{BoxSpawn, Spawn};
@@ -9,7 +10,7 @@ use fibers::sync::mpsc;
 use futures::{Async, Future, Poll, Stream};
 
 use Error;
-use client_side_channel::ClientSideChannel;
+use client_side_channel::{ClientSideChannel, DEFAULT_KEEP_ALIVE_TIMEOUT_SECS};
 use client_side_handlers::BoxResponseHandler;
 use message::OutgoingMessage;
 
@@ -17,12 +18,14 @@ use message::OutgoingMessage;
 #[derive(Debug)]
 pub struct RpcClientServiceBuilder {
     logger: Logger,
+    keep_alive_timeout: Duration,
 }
 impl RpcClientServiceBuilder {
     /// Makes a new `RpcClientServiceBuilder` instance.
     pub fn new() -> Self {
         RpcClientServiceBuilder {
             logger: Logger::root(Discard, o!()),
+            keep_alive_timeout: Duration::from_secs(DEFAULT_KEEP_ALIVE_TIMEOUT_SECS),
         }
     }
 
@@ -34,7 +37,17 @@ impl RpcClientServiceBuilder {
         self
     }
 
-    /// Builds a new `RpcClientService` instance.
+    /// Sets the keep-alive timeout for each RPC connection of the service.
+    ///
+    /// If a connection do not send or receive any messages duration the timeout period,
+    /// it will be disconnected.
+    ///
+    /// The default value is `Duration::from_secs(60 * 10)`.
+    pub fn keep_alive_timeout(&mut self, timeout: Duration) -> &mut Self {
+        self.keep_alive_timeout = timeout;
+        self
+    }
+
     pub fn finish<S>(&self, spawner: S) -> RpcClientService
     where
         S: Spawn + Send + 'static,
@@ -47,6 +60,7 @@ impl RpcClientServiceBuilder {
             command_rx,
             command_tx,
             channels: channels.clone(),
+            keep_alive_timeout: self.keep_alive_timeout,
         }
     }
 }
@@ -66,6 +80,7 @@ pub struct RpcClientService {
     command_rx: mpsc::Receiver<Command>,
     command_tx: mpsc::Sender<Command>,
     channels: Arc<AtomicImmut<HashMap<SocketAddr, RpcChannelHandle>>>,
+    keep_alive_timeout: Duration,
 }
 impl RpcClientService {
     /// Returns a handle of the service.
@@ -86,7 +101,11 @@ impl RpcClientService {
                         info!(logger, "New client-side RPC channel is created");
                         let command_tx = self.command_tx.clone();
                         let mut channels = channels.clone();
-                        let (channel, handle) = RpcChannel::new(logger.clone(), server);
+                        let (mut channel, handle) = RpcChannel::new(logger.clone(), server);
+                        channel
+                            .inner
+                            .set_keep_alive_timeout(self.keep_alive_timeout);
+
                         self.spawner.spawn(channel.then(move |result| {
                             if let Err(e) = result {
                                 error!(logger, "A client-side RPC channel aborted: {}", e);
