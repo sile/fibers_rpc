@@ -26,7 +26,7 @@ pub mod server {
 use client::{RpcCallClient, RpcCastClient, RpcClientServiceHandle};
 use codec::{DefaultDecoderMaker, IntoEncoderMaker, MakeDecoder, MakeEncoder};
 
-mod client_service; // TODO:
+mod client_service;
 mod client_side_channel; // TODO:
 mod client_side_handlers; // TODO:
 mod error;

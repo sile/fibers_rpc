@@ -13,20 +13,28 @@ use client_side_channel::ClientSideChannel;
 use client_side_handlers::BoxResponseHandler;
 use message::OutgoingMessage;
 
+/// `RpcClientService` builder.
 #[derive(Debug)]
 pub struct RpcClientServiceBuilder {
     logger: Logger,
 }
 impl RpcClientServiceBuilder {
+    /// Makes a new `RpcClientServiceBuilder` instance.
     pub fn new() -> Self {
         RpcClientServiceBuilder {
             logger: Logger::root(Discard, o!()),
         }
     }
+
+    /// Sets the logger of the service.
+    ///
+    /// The default value is `Logger::root(Discard, o!())`.
     pub fn logger(&mut self, logger: Logger) -> &mut Self {
         self.logger = logger;
         self
     }
+
+    /// Builds a new `RpcClientService` instance.
     pub fn finish<S>(&self, spawner: S) -> RpcClientService
     where
         S: Spawn + Send + 'static,
@@ -42,7 +50,15 @@ impl RpcClientServiceBuilder {
         }
     }
 }
+impl Default for RpcClientServiceBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
+/// Client side RPC service.
+///
+/// This managements TCP connections between clients and servers.
 #[derive(Debug)]
 pub struct RpcClientService {
     logger: Logger,
@@ -52,6 +68,7 @@ pub struct RpcClientService {
     channels: Arc<AtomicImmut<HashMap<SocketAddr, RpcChannelHandle>>>,
 }
 impl RpcClientService {
+    /// Returns a handle of the service.
     pub fn handle(&self) -> RpcClientServiceHandle {
         RpcClientServiceHandle {
             command_tx: self.command_tx.clone(),
@@ -112,13 +129,14 @@ impl Future for RpcClientService {
     }
 }
 
+/// Handle of `RpcClientService`.
 #[derive(Debug, Clone)]
 pub struct RpcClientServiceHandle {
     command_tx: mpsc::Sender<Command>,
     channels: Arc<AtomicImmut<HashMap<SocketAddr, RpcChannelHandle>>>,
 }
 impl RpcClientServiceHandle {
-    pub fn send_message(&self, server: SocketAddr, message: Message) {
+    pub(crate) fn send_message(&self, server: SocketAddr, message: Message) {
         if let Some(channel) = self.channels.load().get(&server) {
             channel.send_message(message);
         } else {
