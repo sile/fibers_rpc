@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::mem;
 use std::net::SocketAddr;
 use slog::{Discard, Logger};
 use fibers::{BoxSpawn, Spawn};
@@ -34,7 +35,7 @@ impl RpcServerBuilder {
     /// Sets the logger of the server.
     ///
     /// The default value is `Logger::root(Discard, o!())`.
-    pub fn logger(mut self, logger: Logger) -> Self {
+    pub fn logger(&mut self, logger: Logger) -> &mut Self {
         self.logger = logger;
         self
     }
@@ -47,7 +48,7 @@ impl RpcServerBuilder {
     /// # Panices
     ///
     /// If a procedure which has `T::ID` already have been registered, the calling thread will panic.
-    pub fn call_handler<T, H>(self, handler: H) -> Self
+    pub fn call_handler<T, H>(&mut self, handler: H) -> &mut Self
     where
         T: Call,
         H: HandleCall<T>,
@@ -64,7 +65,7 @@ impl RpcServerBuilder {
     /// # Panices
     ///
     /// If a procedure which has `T::ID` already have been registered, the calling thread will panic.
-    pub fn call_handler_with_decoder<T, H, D>(self, handler: H, decoder_maker: D) -> Self
+    pub fn call_handler_with_decoder<T, H, D>(&mut self, handler: H, decoder_maker: D) -> &mut Self
     where
         T: Call,
         H: HandleCall<T>,
@@ -81,7 +82,7 @@ impl RpcServerBuilder {
     /// # Panices
     ///
     /// If a procedure which has `T::ID` already have been registered, the calling thread will panic.
-    pub fn call_handler_with_encoder<T, H, E>(self, handler: H, encoder_maker: E) -> Self
+    pub fn call_handler_with_encoder<T, H, E>(&mut self, handler: H, encoder_maker: E) -> &mut Self
     where
         T: Call,
         H: HandleCall<T>,
@@ -97,11 +98,11 @@ impl RpcServerBuilder {
     ///
     /// If a procedure which has `T::ID` already have been registered, the calling thread will panic.
     pub fn call_handler_with_codec<T, H, D, E>(
-        mut self,
+        &mut self,
         handler: H,
         decoder_maker: D,
         encoder_maker: E,
-    ) -> Self
+    ) -> &mut Self
     where
         T: Call,
         H: HandleCall<T>,
@@ -127,7 +128,7 @@ impl RpcServerBuilder {
     /// # Panices
     ///
     /// If a procedure which has `T::ID` already have been registered, the calling thread will panic.
-    pub fn cast_handler<T, H>(self, handler: H) -> Self
+    pub fn cast_handler<T, H>(&mut self, handler: H) -> &mut Self
     where
         T: Cast,
         H: HandleCast<T>,
@@ -141,7 +142,7 @@ impl RpcServerBuilder {
     /// # Panices
     ///
     /// If a procedure which has `T::ID` already have been registered, the calling thread will panic.
-    pub fn cast_handler_with_decoder<T, H, D>(mut self, handler: H, decoder_maker: D) -> Self
+    pub fn cast_handler_with_decoder<T, H, D>(&mut self, handler: H, decoder_maker: D) -> &mut Self
     where
         T: Cast,
         H: HandleCast<T>,
@@ -160,17 +161,20 @@ impl RpcServerBuilder {
     }
 
     /// Returns the resulting RPC server.
-    pub fn finish<S>(self, spawner: S) -> RpcServer<S>
+    ///
+    /// The invocation of this method consumes all registered handlers.
+    pub fn finish<S>(&mut self, spawner: S) -> RpcServer<S>
     where
         S: Clone + Spawn + Send + 'static,
     {
         let logger = self.logger.new(o!("server" => self.bind_addr.to_string()));
         info!(logger, "Starts RPC server");
+        let handlers = mem::replace(&mut self.handlers, HashMap::new());
         RpcServer {
             listener: Listener::Binding(TcpListener::bind(self.bind_addr)),
             logger,
             spawner,
-            incoming_frame_handler: IncomingFrameHandler::new(self.handlers),
+            incoming_frame_handler: IncomingFrameHandler::new(handlers),
         }
     }
 }
