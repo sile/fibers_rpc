@@ -27,8 +27,8 @@ where
         }
         Ok(())
     }
-    fn finish(&mut self) -> Result<T> {
-        if let Some(message) = self.message.take() {
+    fn finish(self) -> Result<T> {
+        if let Some(message) = self.message {
             Ok(message)
         } else {
             track!(rmp_serde::decode::from_read(&self.buf[..]).map_err(Error::from))

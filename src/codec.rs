@@ -2,7 +2,6 @@
 use std::cmp;
 use std::io::{self, Cursor, Read, Write};
 use std::marker::PhantomData;
-use std::mem;
 
 #[cfg(feature = "msgpack")]
 pub use codec_msgpack::{MsgPackDecoder, MsgPackEncoder};
@@ -18,7 +17,7 @@ pub trait Decode {
     fn decode(&mut self, buf: &[u8], eos: bool) -> Result<()>;
 
     /// Finishes decoding and returns the resulting message.
-    fn finish(&mut self) -> Result<Self::Message>;
+    fn finish(self) -> Result<Self::Message>;
 }
 impl Decode for Vec<u8> {
     type Message = Vec<u8>;
@@ -26,8 +25,8 @@ impl Decode for Vec<u8> {
         self.extend_from_slice(buf);
         Ok(())
     }
-    fn finish(&mut self) -> Result<Vec<u8>> {
-        Ok(mem::replace(self, Vec::new()))
+    fn finish(self) -> Result<Vec<u8>> {
+        Ok(self)
     }
 }
 
@@ -54,8 +53,8 @@ impl<T: DecodeFrom> Decode for SelfDecoder<T> {
         }
         Ok(())
     }
-    fn finish(&mut self) -> Result<T> {
-        if let Some(message) = self.message.take() {
+    fn finish(self) -> Result<T> {
+        if let Some(message) = self.message {
             Ok(message)
         } else {
             track!(T::decode_from(&self.buf[..]))

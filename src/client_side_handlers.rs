@@ -92,14 +92,14 @@ pub type BoxResponseHandler = Box<HandleFrame<Item = ()> + Send + 'static>;
 
 #[derive(Debug)]
 pub struct ResponseHandler<D: Decode> {
-    decoder: D,
+    decoder: Option<D>,
     reply_tx: Option<oneshot::Monitored<D::Message, Error>>,
 }
 impl<D: Decode> ResponseHandler<D> {
     pub fn new(decoder: D, timeout: Option<Duration>) -> (Self, Response<D::Message>) {
         let (reply_tx, reply_rx) = oneshot::monitor();
         let handler = ResponseHandler {
-            decoder,
+            decoder: Some(decoder),
             reply_tx: Some(reply_tx),
         };
 
@@ -111,9 +111,13 @@ impl<D: Decode> ResponseHandler<D> {
 impl<D: Decode> HandleFrame for ResponseHandler<D> {
     type Item = ();
     fn handle_frame(&mut self, frame: &Frame) -> Result<Option<Self::Item>> {
-        track!(self.decoder.decode(frame.data(), frame.is_end_of_message()))?;
+        {
+            let decoder = track_assert_some!(self.decoder.as_mut(), ErrorKind::Other);
+            track!(decoder.decode(frame.data(), frame.is_end_of_message()))?;
+        }
         if frame.is_end_of_message() {
-            let response = track!(self.decoder.finish())?;
+            let decoder = track_assert_some!(self.decoder.take(), ErrorKind::Other);
+            let response = track!(decoder.finish())?;
             let reply_tx = self.reply_tx.take().expect("Never fails");
             reply_tx.exit(Ok(response));
             Ok(Some(()))

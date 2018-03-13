@@ -273,7 +273,7 @@ where
         let handler = CastHandler {
             _rpc: PhantomData,
             handler: Arc::clone(&self.handler),
-            decoder,
+            decoder: Some(decoder),
         };
         Box::new(handler)
     }
@@ -282,7 +282,7 @@ where
 struct CastHandler<T, H, D> {
     _rpc: PhantomData<T>,
     handler: Arc<H>,
-    decoder: D,
+    decoder: Option<D>,
 }
 impl<T, H> HandleMessage for CastHandler<T, H, T::Decoder>
 where
@@ -290,10 +290,12 @@ where
     H: HandleCast<T>,
 {
     fn handle_message(&mut self, data: &[u8], eos: bool) -> Result<()> {
-        track!(self.decoder.decode(data, eos))
+        let decoder = track_assert_some!(self.decoder.as_mut(), ErrorKind::Other);
+        track!(decoder.decode(data, eos))
     }
     fn finish(&mut self) -> Result<Action> {
-        let notification = track!(self.decoder.finish())?;
+        let decoder = track_assert_some!(self.decoder.take(), ErrorKind::Other);
+        let notification = track!(decoder.finish())?;
         let noreply = self.handler.handle_cast(notification);
         Ok(Action::NoReply(noreply))
     }
@@ -333,7 +335,7 @@ where
         let handler = CallHandler {
             _rpc: PhantomData,
             handler: Arc::clone(&self.handler),
-            decoder,
+            decoder: Some(decoder),
             encoder_maker: Arc::clone(&self.encoder_maker),
             seqno,
         };
@@ -344,7 +346,7 @@ where
 struct CallHandler<T, H, D, E> {
     _rpc: PhantomData<T>,
     handler: Arc<H>,
-    decoder: D,
+    decoder: Option<D>,
     encoder_maker: Arc<E>,
     seqno: MessageSeqNo,
 }
@@ -355,10 +357,12 @@ where
     E: MakeEncoder<T::ResEncoder>,
 {
     fn handle_message(&mut self, data: &[u8], eos: bool) -> Result<()> {
-        track!(self.decoder.decode(data, eos))
+        let decoder = track_assert_some!(self.decoder.as_mut(), ErrorKind::Other);
+        track!(decoder.decode(data, eos))
     }
     fn finish(&mut self) -> Result<Action> {
-        let request = track!(self.decoder.finish())?;
+        let decoder = track_assert_some!(self.decoder.take(), ErrorKind::Other);
+        let request = track!(decoder.finish())?;
         let encoder_maker = Arc::clone(&self.encoder_maker);
         let reply = self.handler
             .handle_call(request)
