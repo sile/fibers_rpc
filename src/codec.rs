@@ -41,6 +41,16 @@ impl<T> BytesDecoder<T> {
     pub fn new(bytes: T) -> Self {
         BytesDecoder { bytes, offset: 0 }
     }
+
+    /// Returns a reference to the underlying bytes in this decoder.
+    pub fn get_ref(&self) -> &T {
+        &self.bytes
+    }
+
+    /// Returns a mutable reference to the underlying bytes in this decoder.
+    pub fn get_mut(&mut self) -> &mut T {
+        &mut self.bytes
+    }
 }
 impl<T: AsMut<[u8]>> Decode for BytesDecoder<T> {
     type Message = T;
@@ -174,6 +184,16 @@ impl<T: AsRef<[u8]>> BytesEncoder<T> {
     /// Makes a new `BytesEncoder` instance.
     pub fn new(bytes: T) -> Self {
         Self::from(bytes)
+    }
+
+    /// Returns a reference to the underlying bytes in this decoder.
+    pub fn get_ref(&self) -> &T {
+        &self.bytes
+    }
+
+    /// Returns a mutable reference to the underlying bytes in this decoder.
+    pub fn get_mut(&mut self) -> &mut T {
+        &mut self.bytes
     }
 }
 impl<T: AsRef<[u8]>> From<T> for BytesEncoder<T> {
