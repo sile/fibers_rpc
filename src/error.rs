@@ -1,4 +1,6 @@
 use std;
+#[cfg(feature = "msgpack")]
+use rmp_serde;
 use trackable::error::{ErrorKind as TrackableErrorKind, ErrorKindExt, Failure, TrackableError};
 
 /// This crate specific `Error` type.
@@ -13,6 +15,18 @@ impl From<Failure> for Error {
 impl From<std::io::Error> for Error {
     fn from(f: std::io::Error) -> Self {
         ErrorKind::Other.cause(f).into()
+    }
+}
+#[cfg(feature = "msgpack")]
+impl From<rmp_serde::encode::Error> for Error {
+    fn from(f: rmp_serde::encode::Error) -> Self {
+        ErrorKind::InvalidInput.cause(f).into()
+    }
+}
+#[cfg(feature = "msgpack")]
+impl From<rmp_serde::decode::Error> for Error {
+    fn from(f: rmp_serde::decode::Error) -> Self {
+        ErrorKind::InvalidInput.cause(f).into()
     }
 }
 

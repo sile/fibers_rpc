@@ -18,9 +18,18 @@ atomic_immut = "0.1"
 byteorder = "1"
 fibers = "0.1"
 futures = "0.1"
+rmp-serde = { version = "0.13", optional = true }
+serde = { version = "1", optional = true }
+serde_derive = { version = "1", optional = true }
 slog = "2"
 trackable = "0.2"
 
 [dev-dependencies]
 clap = "2"
 sloggers = "0.2"
+
+[features]
+msgpack = ["serde", "rmp-serde"]
+
+[package.metadata.docs.rs]
+all-features = true

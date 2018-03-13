@@ -4,6 +4,9 @@ use std::io::{self, Cursor, Read, Write};
 use std::marker::PhantomData;
 use std::mem;
 
+#[cfg(feature = "msgpack")]
+pub use codec_msgpack::{MsgPackDecoder, MsgPackEncoder};
+
 use {Error, Result};
 
 /// This trait allows for incrementally decoding an RPC message from a sequence of bytes.
@@ -220,19 +223,19 @@ impl<E> Default for IntoEncoderMaker<E> {
 }
 
 #[derive(Debug)]
-struct TempBuf<'a> {
+pub(crate) struct TempBuf<'a> {
     buf: Cursor<&'a mut [u8]>,
     extra_buf: Vec<u8>,
 }
 impl<'a> TempBuf<'a> {
-    fn new(buf: &'a mut [u8]) -> Self {
+    pub(crate) fn new(buf: &'a mut [u8]) -> Self {
         TempBuf {
             buf: Cursor::new(buf),
             extra_buf: Vec::new(),
         }
     }
 
-    fn finish(self) -> (usize, Vec<u8>) {
+    pub(crate) fn finish(self) -> (usize, Vec<u8>) {
         (self.buf.position() as usize, self.extra_buf)
     }
 }

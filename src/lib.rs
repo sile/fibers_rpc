@@ -66,6 +66,10 @@ extern crate atomic_immut;
 extern crate byteorder;
 extern crate fibers;
 extern crate futures;
+#[cfg(feature = "msgpack")]
+extern crate rmp_serde;
+#[cfg(feature = "msgpack")]
+extern crate serde;
 #[macro_use]
 extern crate slog;
 #[macro_use]
@@ -94,6 +98,8 @@ use codec::{DefaultDecoderMaker, IntoEncoderMaker, MakeDecoder, MakeEncoder};
 mod client_service;
 mod client_side_channel;
 mod client_side_handlers;
+#[cfg(feature = "msgpack")]
+mod codec_msgpack;
 mod error;
 mod frame;
 mod frame_stream;
