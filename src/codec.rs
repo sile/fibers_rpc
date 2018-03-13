@@ -6,7 +6,7 @@ use std::marker::PhantomData;
 #[cfg(feature = "msgpack")]
 pub use codec_msgpack::{MsgPackDecoder, MsgPackEncoder};
 
-use {Error, Result};
+use {Error, ErrorKind, Result};
 
 /// This trait allows for incrementally decoding an RPC message from a sequence of bytes.
 pub trait Decode {
@@ -27,6 +27,43 @@ impl Decode for Vec<u8> {
     }
     fn finish(self) -> Result<Vec<u8>> {
         Ok(self)
+    }
+}
+
+/// An implementation of `Decode` traits which fills the given buffer `T`.
+#[derive(Debug)]
+pub struct BytesDecoder<T> {
+    bytes: T,
+    offset: usize,
+}
+impl<T> BytesDecoder<T> {
+    /// Makes new `BytesDecoder` instance.
+    pub fn new(bytes: T) -> Self {
+        BytesDecoder { bytes, offset: 0 }
+    }
+}
+impl<T: AsMut<[u8]>> Decode for BytesDecoder<T> {
+    type Message = T;
+    fn decode(&mut self, buf: &[u8], _eos: bool) -> Result<()> {
+        track_assert!(
+            self.offset + buf.len() <= self.bytes.as_mut().len(),
+            ErrorKind::InvalidInput,
+            "Too much input bytes: required={}, capacity={}",
+            self.offset + buf.len(),
+            self.bytes.as_mut().len(),
+        );
+        (&mut self.bytes.as_mut()[self.offset..][..buf.len()]).copy_from_slice(buf);
+        self.offset += buf.len();
+        Ok(())
+    }
+    fn finish(mut self) -> Result<T> {
+        track_assert_eq!(
+            self.offset,
+            self.bytes.as_mut().len(),
+            ErrorKind::InvalidInput,
+            "Too few input bytes"
+        );
+        Ok(self.bytes)
     }
 }
 
