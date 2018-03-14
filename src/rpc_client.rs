@@ -3,29 +3,29 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use {Call, Cast};
-use client_service::{Message, RpcClientServiceHandle};
+use client_service::{ClientServiceHandle, Message};
 use client_side_handlers::{Response, ResponseHandler};
 use codec::{MakeDecoder, MakeEncoder};
 use message::OutgoingMessage;
 
 /// Client for notification RPC.
 #[derive(Debug)]
-pub struct RpcCastClient<'a, T, E> {
-    service: &'a RpcClientServiceHandle,
+pub struct CastClient<'a, T, E> {
+    service: &'a ClientServiceHandle,
     encoder_maker: E,
-    options: RpcOptions,
+    options: Options,
     _cast: PhantomData<T>,
 }
-impl<'a, T, E> RpcCastClient<'a, T, E>
+impl<'a, T, E> CastClient<'a, T, E>
 where
     T: Cast,
     E: MakeEncoder<T::Encoder>,
 {
-    pub(crate) fn new(service: &'a RpcClientServiceHandle, encoder_maker: E) -> Self {
-        RpcCastClient {
+    pub(crate) fn new(service: &'a ClientServiceHandle, encoder_maker: E) -> Self {
+        CastClient {
             service,
             encoder_maker,
-            options: RpcOptions::default(),
+            options: Options::default(),
             _cast: PhantomData,
         }
     }
@@ -43,14 +43,14 @@ where
         self.service.send_message(server, message);
     }
 }
-impl<'a, T, E> RpcCastClient<'a, T, E> {
+impl<'a, T, E> CastClient<'a, T, E> {
     /// Returns a reference to the RPC options of this client.
-    pub fn options(&self) -> &RpcOptions {
+    pub fn options(&self) -> &Options {
         &self.options
     }
 
     /// Returns a mutable reference to the RPC options of this client.
-    pub fn options_mut(&mut self) -> &mut RpcOptions {
+    pub fn options_mut(&mut self) -> &mut Options {
         &mut self.options
     }
 
@@ -67,29 +67,29 @@ impl<'a, T, E> RpcCastClient<'a, T, E> {
 
 /// Client for request/response RPC.
 #[derive(Debug)]
-pub struct RpcCallClient<'a, T, D, E> {
-    service: &'a RpcClientServiceHandle,
+pub struct CallClient<'a, T, D, E> {
+    service: &'a ClientServiceHandle,
     decoder_maker: D,
     encoder_maker: E,
-    options: RpcOptions,
+    options: Options,
     _call: PhantomData<T>,
 }
-impl<'a, T, D, E> RpcCallClient<'a, T, D, E>
+impl<'a, T, D, E> CallClient<'a, T, D, E>
 where
     T: Call,
     D: MakeDecoder<T::ResDecoder>,
     E: MakeEncoder<T::ReqEncoder>,
 {
     pub(crate) fn new(
-        service: &'a RpcClientServiceHandle,
+        service: &'a ClientServiceHandle,
         decoder_maker: D,
         encoder_maker: E,
     ) -> Self {
-        RpcCallClient {
+        CallClient {
             service,
             decoder_maker,
             encoder_maker,
-            options: RpcOptions::default(),
+            options: Options::default(),
             _call: PhantomData,
         }
     }
@@ -111,14 +111,14 @@ where
         response
     }
 }
-impl<'a, T, D, E> RpcCallClient<'a, T, D, E> {
+impl<'a, T, D, E> CallClient<'a, T, D, E> {
     /// Returns a reference to the RPC options of this client.
-    pub fn options(&self) -> &RpcOptions {
+    pub fn options(&self) -> &Options {
         &self.options
     }
 
     /// Returns a mutable reference to the RPC options of this client.
-    pub fn options_mut(&mut self) -> &mut RpcOptions {
+    pub fn options_mut(&mut self) -> &mut Options {
         &mut self.options
     }
 
@@ -145,7 +145,7 @@ impl<'a, T, D, E> RpcCallClient<'a, T, D, E> {
 
 /// Options for RPC.
 #[derive(Debug, Clone)]
-pub struct RpcOptions {
+pub struct Options {
     /// The timeout of a RPC request.
     ///
     /// The default value is `None` and it means there is no timeout.
@@ -166,13 +166,13 @@ pub struct RpcOptions {
     /// The defaul value is `false`.
     pub force_wakeup: bool,
 }
-impl RpcOptions {
+impl Options {
     /// The default value of the `max_concurrency` field.
     pub const DEFAULT_MAX_CONCURRENCY: usize = 4096;
 }
-impl Default for RpcOptions {
+impl Default for Options {
     fn default() -> Self {
-        RpcOptions {
+        Options {
             timeout: None,
             max_concurrency: Self::DEFAULT_MAX_CONCURRENCY,
             force_wakeup: false,

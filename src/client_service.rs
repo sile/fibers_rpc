@@ -14,16 +14,16 @@ use client_side_channel::{ClientSideChannel, DEFAULT_KEEP_ALIVE_TIMEOUT_SECS};
 use client_side_handlers::BoxResponseHandler;
 use message::OutgoingMessage;
 
-/// `RpcClientService` builder.
+/// `ClientService` builder.
 #[derive(Debug)]
-pub struct RpcClientServiceBuilder {
+pub struct ClientServiceBuilder {
     logger: Logger,
     keep_alive_timeout: Duration,
 }
-impl RpcClientServiceBuilder {
-    /// Makes a new `RpcClientServiceBuilder` instance.
+impl ClientServiceBuilder {
+    /// Makes a new `ClientServiceBuilder` instance.
     pub fn new() -> Self {
-        RpcClientServiceBuilder {
+        ClientServiceBuilder {
             logger: Logger::root(Discard, o!()),
             keep_alive_timeout: Duration::from_secs(DEFAULT_KEEP_ALIVE_TIMEOUT_SECS),
         }
@@ -48,14 +48,14 @@ impl RpcClientServiceBuilder {
         self
     }
 
-    /// Builds a new `RpcClientService` instance.
-    pub fn finish<S>(&self, spawner: S) -> RpcClientService
+    /// Builds a new `ClientService` instance.
+    pub fn finish<S>(&self, spawner: S) -> ClientService
     where
         S: Spawn + Send + 'static,
     {
         let (command_tx, command_rx) = mpsc::channel();
         let channels = Arc::new(AtomicImmut::default());
-        RpcClientService {
+        ClientService {
             logger: self.logger.clone(),
             spawner: spawner.boxed(),
             command_rx,
@@ -65,7 +65,7 @@ impl RpcClientServiceBuilder {
         }
     }
 }
-impl Default for RpcClientServiceBuilder {
+impl Default for ClientServiceBuilder {
     fn default() -> Self {
         Self::new()
     }
@@ -75,18 +75,18 @@ impl Default for RpcClientServiceBuilder {
 ///
 /// This managements TCP connections between clients and servers.
 #[derive(Debug)]
-pub struct RpcClientService {
+pub struct ClientService {
     logger: Logger,
     spawner: BoxSpawn,
     command_rx: mpsc::Receiver<Command>,
     command_tx: mpsc::Sender<Command>,
-    channels: Arc<AtomicImmut<HashMap<SocketAddr, RpcChannelHandle>>>,
+    channels: Arc<AtomicImmut<HashMap<SocketAddr, ChannelHandle>>>,
     keep_alive_timeout: Duration,
 }
-impl RpcClientService {
+impl ClientService {
     /// Returns a handle of the service.
-    pub fn handle(&self) -> RpcClientServiceHandle {
-        RpcClientServiceHandle {
+    pub fn handle(&self) -> ClientServiceHandle {
+        ClientServiceHandle {
             command_tx: self.command_tx.clone(),
             channels: Arc::clone(&self.channels),
         }
@@ -102,7 +102,7 @@ impl RpcClientService {
                         info!(logger, "New client-side RPC channel is created");
                         let command_tx = self.command_tx.clone();
                         let mut channels = channels.clone();
-                        let (mut channel, handle) = RpcChannel::new(logger.clone(), server);
+                        let (mut channel, handle) = Channel::new(logger.clone(), server);
                         channel
                             .inner
                             .set_keep_alive_timeout(self.keep_alive_timeout);
@@ -136,7 +136,7 @@ impl RpcClientService {
         }
     }
 }
-impl Future for RpcClientService {
+impl Future for ClientService {
     type Item = ();
     type Error = Error;
 
@@ -149,13 +149,13 @@ impl Future for RpcClientService {
     }
 }
 
-/// Handle of `RpcClientService`.
+/// Handle of `ClientService`.
 #[derive(Debug, Clone)]
-pub struct RpcClientServiceHandle {
+pub struct ClientServiceHandle {
     command_tx: mpsc::Sender<Command>,
-    channels: Arc<AtomicImmut<HashMap<SocketAddr, RpcChannelHandle>>>,
+    channels: Arc<AtomicImmut<HashMap<SocketAddr, ChannelHandle>>>,
 }
-impl RpcClientServiceHandle {
+impl ClientServiceHandle {
     pub(crate) fn send_message(&self, server: SocketAddr, message: Message) {
         if let Some(channel) = self.channels.load().get(&server) {
             channel.send_message(message);
@@ -181,20 +181,20 @@ enum Command {
 }
 
 #[derive(Debug)]
-struct RpcChannel {
+struct Channel {
     inner: ClientSideChannel,
     message_rx: mpsc::Receiver<Message>,
 }
-impl RpcChannel {
-    fn new(logger: Logger, server: SocketAddr) -> (Self, RpcChannelHandle) {
+impl Channel {
+    fn new(logger: Logger, server: SocketAddr) -> (Self, ChannelHandle) {
         let (message_tx, message_rx) = mpsc::channel();
         let inner = ClientSideChannel::new(logger, server);
-        let channel = RpcChannel { inner, message_rx };
-        let handle = RpcChannelHandle { message_tx };
+        let channel = Channel { inner, message_rx };
+        let handle = ChannelHandle { message_tx };
         (channel, handle)
     }
 }
-impl Future for RpcChannel {
+impl Future for Channel {
     type Item = ();
     type Error = Error;
 
@@ -214,10 +214,10 @@ impl Future for RpcChannel {
 }
 
 #[derive(Debug, Clone)]
-struct RpcChannelHandle {
+struct ChannelHandle {
     message_tx: mpsc::Sender<Message>,
 }
-impl RpcChannelHandle {
+impl ChannelHandle {
     pub fn send_message(&self, message: Message) {
         let _ = self.message_tx.send(message);
     }

@@ -82,17 +82,17 @@ pub mod client {
     //! RPC client.
 
     pub use client_side_handlers::Response;
-    pub use client_service::{RpcClientService, RpcClientServiceBuilder, RpcClientServiceHandle};
-    pub use rpc_client::{RpcCallClient, RpcCastClient, RpcOptions};
+    pub use client_service::{ClientService, ClientServiceBuilder, ClientServiceHandle};
+    pub use rpc_client::{CallClient, CastClient, Options};
 }
 pub mod server {
     //! RPC server.
 
-    pub use rpc_server::{RpcServer, RpcServerBuilder};
+    pub use rpc_server::{Server, ServerBuilder};
     pub use server_side_handlers::{HandleCall, HandleCast, Never, NoReply, Reply};
 }
 
-use client::{RpcCallClient, RpcCastClient, RpcClientServiceHandle};
+use client::{CallClient, CastClient, ClientServiceHandle};
 use codec::{DefaultDecoderMaker, IntoEncoderMaker, MakeDecoder, MakeEncoder};
 
 mod client_service;
@@ -149,12 +149,8 @@ pub trait Call: Sized + Send + Sync + 'static {
 
     /// Makes a new RPC client.
     fn client(
-        service: &RpcClientServiceHandle,
-    ) -> RpcCallClient<
-        Self,
-        DefaultDecoderMaker<Self::ResDecoder>,
-        IntoEncoderMaker<Self::ReqEncoder>,
-    >
+        service: &ClientServiceHandle,
+    ) -> CallClient<Self, DefaultDecoderMaker<Self::ResDecoder>, IntoEncoderMaker<Self::ReqEncoder>>
     where
         Self::ReqEncoder: From<Self::Req>,
         Self::ResDecoder: Default,
@@ -164,9 +160,9 @@ pub trait Call: Sized + Send + Sync + 'static {
 
     /// Makes a new RPC client with the given decoder maker.
     fn client_with_decoder<D>(
-        service: &RpcClientServiceHandle,
+        service: &ClientServiceHandle,
         decoder_maker: D,
-    ) -> RpcCallClient<Self, D, IntoEncoderMaker<Self::ReqEncoder>>
+    ) -> CallClient<Self, D, IntoEncoderMaker<Self::ReqEncoder>>
     where
         Self::ReqEncoder: From<Self::Req>,
         D: MakeDecoder<Self::ResDecoder>,
@@ -176,9 +172,9 @@ pub trait Call: Sized + Send + Sync + 'static {
 
     /// Makes a new RPC client with the given encoder maker.
     fn client_with_encoder<E>(
-        service: &RpcClientServiceHandle,
+        service: &ClientServiceHandle,
         encoder_maker: E,
-    ) -> RpcCallClient<Self, DefaultDecoderMaker<Self::ResDecoder>, E>
+    ) -> CallClient<Self, DefaultDecoderMaker<Self::ResDecoder>, E>
     where
         Self::ResDecoder: Default,
         E: MakeEncoder<Self::ReqEncoder>,
@@ -188,15 +184,15 @@ pub trait Call: Sized + Send + Sync + 'static {
 
     /// Makes a new RPC client with the given decoder and encoder makers.
     fn client_with_codec<D, E>(
-        service: &RpcClientServiceHandle,
+        service: &ClientServiceHandle,
         decoder_maker: D,
         encoder_maker: E,
-    ) -> RpcCallClient<Self, D, E>
+    ) -> CallClient<Self, D, E>
     where
         D: MakeDecoder<Self::ResDecoder>,
         E: MakeEncoder<Self::ReqEncoder>,
     {
-        RpcCallClient::new(service, decoder_maker, encoder_maker)
+        CallClient::new(service, decoder_maker, encoder_maker)
     }
 }
 
@@ -220,9 +216,7 @@ pub trait Cast: Sized + Sync + Send + 'static {
     type Decoder: codec::Decode<Message = Self::Notification> + Send + 'static;
 
     /// Makes a new RPC client.
-    fn client(
-        service: &RpcClientServiceHandle,
-    ) -> RpcCastClient<Self, IntoEncoderMaker<Self::Encoder>>
+    fn client(service: &ClientServiceHandle) -> CastClient<Self, IntoEncoderMaker<Self::Encoder>>
     where
         Self::Encoder: From<Self::Notification>,
     {
@@ -231,13 +225,13 @@ pub trait Cast: Sized + Sync + Send + 'static {
 
     /// Makes a new RPC client with the given encoder maker.
     fn client_with_encoder<E>(
-        service: &RpcClientServiceHandle,
+        service: &ClientServiceHandle,
         encoder_maker: E,
-    ) -> RpcCastClient<Self, E>
+    ) -> CastClient<Self, E>
     where
         E: MakeEncoder<Self::Encoder>,
     {
-        RpcCastClient::new(service, encoder_maker)
+        CastClient::new(service, encoder_maker)
     }
 }
 
@@ -247,7 +241,7 @@ mod test {
     use futures::Future;
 
     use {Call, ProcedureId};
-    use client::RpcClientServiceBuilder;
+    use client::ClientServiceBuilder;
     use codec::BytesEncoder;
     use server::{HandleCall, Reply, RpcServerBuilder};
 
@@ -285,7 +279,7 @@ mod test {
         executor.spawn(server.map_err(|e| panic!("{}", e)));
 
         // Client
-        let service = RpcClientServiceBuilder::new().finish(executor.handle());
+        let service = ClientServiceBuilder::new().finish(executor.handle());
 
         let request = Vec::from(&b"hello"[..]);
         let response = EchoRpc::client(&service.handle()).call(server_addr, request.clone());

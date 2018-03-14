@@ -17,15 +17,15 @@ use server_side_handlers::{Action, CallHandlerFactory, CastHandlerFactory, Handl
                            IncomingFrameHandler, MessageHandlers, Never};
 
 /// RPC server builder.
-pub struct RpcServerBuilder {
+pub struct ServerBuilder {
     bind_addr: SocketAddr,
     logger: Logger,
     handlers: MessageHandlers,
 }
-impl RpcServerBuilder {
-    /// Makes a new `RpcServerBuilder` instance.
+impl ServerBuilder {
+    /// Makes a new `ServerBuilder` instance.
     pub fn new(bind_addr: SocketAddr) -> Self {
-        RpcServerBuilder {
+        ServerBuilder {
             bind_addr,
             logger: Logger::root(Discard, o!()),
             handlers: HashMap::new(),
@@ -163,14 +163,14 @@ impl RpcServerBuilder {
     /// Returns the resulting RPC server.
     ///
     /// The invocation of this method consumes all registered handlers.
-    pub fn finish<S>(&mut self, spawner: S) -> RpcServer<S>
+    pub fn finish<S>(&mut self, spawner: S) -> Server<S>
     where
         S: Clone + Spawn + Send + 'static,
     {
         let logger = self.logger.new(o!("server" => self.bind_addr.to_string()));
         info!(logger, "Starts RPC server");
         let handlers = mem::replace(&mut self.handlers, HashMap::new());
-        RpcServer {
+        Server {
             listener: Listener::Binding(TcpListener::bind(self.bind_addr)),
             logger,
             spawner,
@@ -180,13 +180,13 @@ impl RpcServerBuilder {
 }
 
 /// RPC server.
-pub struct RpcServer<S> {
+pub struct Server<S> {
     listener: Listener,
     logger: Logger,
     spawner: S,
     incoming_frame_handler: IncomingFrameHandler,
 }
-impl<S> Future for RpcServer<S>
+impl<S> Future for Server<S>
 where
     S: Clone + Spawn + Send + 'static,
 {
