@@ -14,9 +14,9 @@
 //! # fn main() {
 //! use fibers::{Executor, InPlaceExecutor, Spawn};
 //! use fibers_rpc::{Call, ProcedureId};
-//! use fibers_rpc::client::RpcClientServiceBuilder;
+//! use fibers_rpc::client::ClientServiceBuilder;
 //! use fibers_rpc::codec::BytesEncoder;
-//! use fibers_rpc::server::{HandleCall, Reply, RpcServerBuilder};
+//! use fibers_rpc::server::{HandleCall, Reply, ServerBuilder};
 //! use futures::Future;
 //!
 //! // RPC definition
@@ -45,13 +45,13 @@
 //!     }
 //! }
 //! let server_addr = "127.0.0.1:1919".parse().unwrap();
-//! let server = RpcServerBuilder::new(server_addr)
+//! let server = ServerBuilder::new(server_addr)
 //!     .call_handler(EchoHandler)
 //!     .finish(executor.handle());
 //! executor.spawn(server.map_err(|e| panic!("{}", e)));
 //!
 //! // RPC client
-//! let service = RpcClientServiceBuilder::new().finish(executor.handle());
+//! let service = ClientServiceBuilder::new().finish(executor.handle());
 //!
 //! let request = Vec::from(&b"hello"[..]);
 //! let response = EchoRpc::client(&service.handle()).call(server_addr, request.clone());
@@ -243,7 +243,7 @@ mod test {
     use {Call, ProcedureId};
     use client::ClientServiceBuilder;
     use codec::BytesEncoder;
-    use server::{HandleCall, Reply, RpcServerBuilder};
+    use server::{HandleCall, Reply, ServerBuilder};
 
     #[test]
     fn it_works() {
@@ -273,7 +273,7 @@ mod test {
             }
         }
         let server_addr = "127.0.0.1:1919".parse().unwrap();
-        let server = RpcServerBuilder::new(server_addr)
+        let server = ServerBuilder::new(server_addr)
             .call_handler(EchoHandler)
             .finish(executor.handle());
         executor.spawn(server.map_err(|e| panic!("{}", e)));

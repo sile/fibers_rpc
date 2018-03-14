@@ -12,9 +12,9 @@ use std::time::Duration;
 use clap::{App, Arg, SubCommand};
 use fibers::{Executor, InPlaceExecutor, Spawn};
 use fibers_rpc::{Call, ProcedureId};
-use fibers_rpc::client::RpcClientServiceBuilder;
+use fibers_rpc::client::ClientServiceBuilder;
 use fibers_rpc::codec::BytesEncoder;
-use fibers_rpc::server::{HandleCall, Reply, RpcServerBuilder};
+use fibers_rpc::server::{HandleCall, Reply, ServerBuilder};
 use futures::Future;
 use sloggers::Build;
 use sloggers::terminal::TerminalLoggerBuilder;
@@ -85,7 +85,7 @@ fn main() {
     let mut executor = track_try_unwrap!(InPlaceExecutor::new().map_err(Failure::from_error));
 
     if let Some(_matches) = matches.subcommand_matches("server") {
-        let server = RpcServerBuilder::new(addr)
+        let server = ServerBuilder::new(addr)
             .logger(logger)
             .call_handler(EchoHandler)
             .finish(executor.handle());
@@ -97,7 +97,7 @@ fn main() {
             matches.value_of("TIMEOUT").unwrap().parse()
         )));
 
-        let service = RpcClientServiceBuilder::new()
+        let service = ClientServiceBuilder::new()
             .logger(logger)
             .finish(executor.handle());
         let client_service = service.handle();
