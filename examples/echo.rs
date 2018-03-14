@@ -59,12 +59,19 @@ fn main() {
         )
         .subcommand(SubCommand::with_name("server"))
         .subcommand(
-            SubCommand::with_name("client").arg(
-                Arg::with_name("TIMEOUT")
-                    .long("timeout")
-                    .takes_value(true)
-                    .default_value("5000"),
-            ),
+            SubCommand::with_name("client")
+                .arg(
+                    Arg::with_name("TIMEOUT")
+                        .long("timeout")
+                        .takes_value(true)
+                        .default_value("5000"),
+                )
+                .arg(
+                    Arg::with_name("REPEAT")
+                        .long("repeat")
+                        .takes_value(true)
+                        .default_value("1"),
+                ),
         )
         .get_matches();
 
@@ -96,6 +103,8 @@ fn main() {
         let timeout = Duration::from_millis(track_try_unwrap!(track_any_err!(
             matches.value_of("TIMEOUT").unwrap().parse()
         )));
+        let repeat: usize =
+            track_try_unwrap!(track_any_err!(matches.value_of("REPEAT").unwrap().parse()));
 
         let service = ClientServiceBuilder::new()
             .logger(logger)
@@ -110,12 +119,15 @@ fn main() {
                 .map_err(Failure::from_error)
         );
 
-        let mut client = EchoRpc::client(&client_service);
-        client.options_mut().timeout = Some(timeout);
-        let future = client.call(addr, buf);
-        let result = track_try_unwrap!(executor.run_future(future).map_err(Failure::from_error));
-        let response = track_try_unwrap!(result);
-        let _ = std::io::stdout().write(&response);
+        for _ in 0..repeat {
+            let mut client = EchoRpc::client(&client_service);
+            client.options_mut().timeout = Some(timeout);
+            let future = client.call(addr, buf.clone());
+            let result =
+                track_try_unwrap!(executor.run_future(future).map_err(Failure::from_error));
+            let response = track_try_unwrap!(result);
+            let _ = std::io::stdout().write(&response);
+        }
     } else {
         println!("{}", matches.usage());
         std::process::exit(1);
