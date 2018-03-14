@@ -248,33 +248,41 @@ impl Future for ChannelHandler {
     type Error = Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        while let Async::Ready(action) = track!(self.channel.poll())? {
-            if let Some(action) = action {
-                match action {
-                    Action::NoReply(noreply) => {
-                        if let Some(future) = noreply.into_future() {
-                            self.spawner.spawn(future.map_err(|_: Never| ()));
+        loop {
+            while let Async::Ready(action) = track!(self.channel.poll())? {
+                if let Some(action) = action {
+                    match action {
+                        Action::NoReply(noreply) => {
+                            if let Some(future) = noreply.into_future() {
+                                self.spawner.spawn(future.map_err(|_: Never| ()));
+                            }
+                        }
+                        Action::Reply(mut reply) => {
+                            if let Some((seqno, message)) = reply.try_take() {
+                                self.channel.reply(seqno, message);
+                            } else {
+                                let reply_tx = self.reply_tx.clone();
+                                let future = reply.map(move |(seqno, message)| {
+                                    let _ = reply_tx.send((seqno, message));
+                                });
+                                self.spawner.spawn(future.map_err(|_: Never| ()));
+                            }
                         }
                     }
-                    Action::Reply(mut reply) => {
-                        if let Some((seqno, message)) = reply.try_take() {
-                            self.channel.reply(seqno, message);
-                        } else {
-                            let reply_tx = self.reply_tx.clone();
-                            let future = reply.map(move |(seqno, message)| {
-                                let _ = reply_tx.send((seqno, message));
-                            });
-                            self.spawner.spawn(future.map_err(|_: Never| ()));
-                        }
-                    }
+                } else {
+                    return Ok(Async::Ready(()));
                 }
-            } else {
-                return Ok(Async::Ready(()));
             }
-        }
-        while let Async::Ready(item) = self.reply_rx.poll().expect("Never fails") {
-            let (seqno, message) = item.expect("Never fails");
-            self.channel.reply(seqno, message);
+
+            let mut do_break = true;
+            while let Async::Ready(item) = self.reply_rx.poll().expect("Never fails") {
+                let (seqno, message) = item.expect("Never fails");
+                self.channel.reply(seqno, message);
+                do_break = false;
+            }
+            if do_break {
+                break;
+            }
         }
         Ok(Async::NotReady)
     }
