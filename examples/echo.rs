@@ -110,9 +110,9 @@ fn main() {
                 .map_err(Failure::from_error)
         );
 
-        let future = EchoRpc::client(&client_service)
-            .timeout(Some(timeout))
-            .call(addr, buf);
+        let mut client = EchoRpc::client(&client_service);
+        client.options_mut().timeout = Some(timeout);
+        let future = client.call(addr, buf);
         let result = track_try_unwrap!(executor.run_future(future).map_err(Failure::from_error));
         let response = track_try_unwrap!(result);
         let _ = std::io::stdout().write(&response);

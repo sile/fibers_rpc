@@ -83,7 +83,7 @@ pub mod client {
 
     pub use client_side_handlers::Response;
     pub use client_service::{RpcClientService, RpcClientServiceBuilder, RpcClientServiceHandle};
-    pub use rpc_client::{RpcCallClient, RpcCastClient};
+    pub use rpc_client::{RpcCallClient, RpcCastClient, RpcOptions};
 }
 pub mod server {
     //! RPC server.
