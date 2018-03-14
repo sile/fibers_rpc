@@ -245,33 +245,35 @@ mod test {
     use codec::BytesEncoder;
     use server::{HandleCall, Reply, ServerBuilder};
 
+    // RPC
+    struct EchoRpc;
+    impl Call for EchoRpc {
+        const ID: ProcedureId = ProcedureId(0);
+        const NAME: &'static str = "echo";
+
+        type Req = Vec<u8>;
+        type ReqEncoder = BytesEncoder<Vec<u8>>;
+        type ReqDecoder = Vec<u8>;
+
+        type Res = Vec<u8>;
+        type ResEncoder = BytesEncoder<Vec<u8>>;
+        type ResDecoder = Vec<u8>;
+    }
+
+    // Handler
+    struct EchoHandler;
+    impl HandleCall<EchoRpc> for EchoHandler {
+        fn handle_call(&self, request: <EchoRpc as Call>::Req) -> Reply<EchoRpc> {
+            Reply::done(request)
+        }
+    }
+
     #[test]
     fn it_works() {
-        // RPC
-        struct EchoRpc;
-        impl Call for EchoRpc {
-            const ID: ProcedureId = ProcedureId(0);
-            const NAME: &'static str = "echo";
-
-            type Req = Vec<u8>;
-            type ReqEncoder = BytesEncoder<Vec<u8>>;
-            type ReqDecoder = Vec<u8>;
-
-            type Res = Vec<u8>;
-            type ResEncoder = BytesEncoder<Vec<u8>>;
-            type ResDecoder = Vec<u8>;
-        }
-
         // Executor
         let mut executor = track_try_unwrap!(track_any_err!(InPlaceExecutor::new()));
 
         // Server
-        struct EchoHandler;
-        impl HandleCall<EchoRpc> for EchoHandler {
-            fn handle_call(&self, request: <EchoRpc as Call>::Req) -> Reply<EchoRpc> {
-                Reply::done(request)
-            }
-        }
         let server_addr = "127.0.0.1:1919".parse().unwrap();
         let server = ServerBuilder::new(server_addr)
             .call_handler(EchoHandler)
@@ -282,6 +284,29 @@ mod test {
         let service = ClientServiceBuilder::new().finish(executor.handle());
 
         let request = Vec::from(&b"hello"[..]);
+        let response = EchoRpc::client(&service.handle()).call(server_addr, request.clone());
+
+        executor.spawn(service.map_err(|e| panic!("{}", e)));
+        let result = track_try_unwrap!(track_any_err!(executor.run_future(response)));
+        assert_eq!(result.ok(), Some(request));
+    }
+
+    #[test]
+    fn large_message_works() {
+        // Executor
+        let mut executor = track_try_unwrap!(track_any_err!(InPlaceExecutor::new()));
+
+        // Server
+        let server_addr = "127.0.0.1:1919".parse().unwrap();
+        let server = ServerBuilder::new(server_addr)
+            .call_handler(EchoHandler)
+            .finish(executor.handle());
+        executor.spawn(server.map_err(|e| panic!("{}", e)));
+
+        // Client
+        let service = ClientServiceBuilder::new().finish(executor.handle());
+
+        let request = vec![0; 10 * 1024 * 1024];
         let response = EchoRpc::client(&service.handle()).call(server_addr, request.clone());
 
         executor.spawn(service.map_err(|e| panic!("{}", e)));

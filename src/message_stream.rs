@@ -34,7 +34,8 @@ impl<H: HandleFrame> MessageStream<H> {
         &mut self.incoming_frame_handler
     }
 
-    fn handle_outgoing_messages(&mut self) {
+    fn handle_outgoing_messages(&mut self) -> bool {
+        let mut did_something = false;
         while let Some((seqno, mut message)) = self.outgoing_messages.pop_front() {
             let result = self.frame_stream
                 .send_frame(seqno, |frame| track!(message.encode(frame.data())));
@@ -45,6 +46,7 @@ impl<H: HandleFrame> MessageStream<H> {
                         result: Err(e),
                     };
                     self.event_queue.push_back(event);
+                    did_something = true;
                 }
                 Ok(None) => {
                     // The sending buffer is full
@@ -54,6 +56,7 @@ impl<H: HandleFrame> MessageStream<H> {
                 Ok(Some(false)) => {
                     // A part of the message was written to the sending buffer
                     self.outgoing_messages.push_back((seqno, message));
+                    did_something = true;
                 }
                 Ok(Some(true)) => {
                     // Completed to write the message to the sending buffer
@@ -62,13 +65,18 @@ impl<H: HandleFrame> MessageStream<H> {
                         result: Ok(()),
                     };
                     self.event_queue.push_back(event);
+                    did_something = true;
                 }
             }
         }
+        did_something
     }
 
-    fn handle_incoming_frames(&mut self) {
+    fn handle_incoming_frames(&mut self) -> bool {
+        let mut did_something = false;
         while let Some(frame) = self.frame_stream.recv_frame() {
+            did_something = true;
+
             let seqno = frame.seqno();
             if self.cancelled_incoming_messages.contains(&seqno) {
                 if frame.is_end_of_message() {
@@ -103,6 +111,7 @@ impl<H: HandleFrame> MessageStream<H> {
                 }
             }
         }
+        did_something
     }
 }
 impl<H: HandleFrame> Stream for MessageStream<H> {
@@ -110,13 +119,18 @@ impl<H: HandleFrame> Stream for MessageStream<H> {
     type Error = Error;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        let eos = track!(self.frame_stream.poll())?.is_ready();
-        if eos {
-            return Ok(Async::Ready(None));
-        }
+        loop {
+            let eos = track!(self.frame_stream.poll())?.is_ready();
+            if eos {
+                return Ok(Async::Ready(None));
+            }
 
-        self.handle_outgoing_messages();
-        self.handle_incoming_frames();
+            let is_send_buf_updated = self.handle_outgoing_messages();
+            let is_recv_buf_updated = self.handle_incoming_frames();
+            if !(is_send_buf_updated || is_recv_buf_updated) {
+                break;
+            }
+        }
 
         if let Some(event) = self.event_queue.pop_front() {
             Ok(Async::Ready(Some(event)))
