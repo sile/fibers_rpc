@@ -274,7 +274,7 @@ mod test {
         let mut executor = track_try_unwrap!(track_any_err!(InPlaceExecutor::new()));
 
         // Server
-        let server_addr = "127.0.0.1:1919".parse().unwrap();
+        let server_addr = "127.0.0.1:1920".parse().unwrap();
         let server = ServerBuilder::new(server_addr)
             .call_handler(EchoHandler)
             .finish(executor.handle());
@@ -297,7 +297,7 @@ mod test {
         let mut executor = track_try_unwrap!(track_any_err!(InPlaceExecutor::new()));
 
         // Server
-        let server_addr = "127.0.0.1:1919".parse().unwrap();
+        let server_addr = "127.0.0.1:1921".parse().unwrap();
         let server = ServerBuilder::new(server_addr)
             .call_handler(EchoHandler)
             .finish(executor.handle());
