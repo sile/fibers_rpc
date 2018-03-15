@@ -152,17 +152,6 @@ pub enum Action {
     Reply(BoxReply),
     NoReply(NoReply),
 }
-impl Future for Action {
-    type Item = Option<(MessageSeqNo, OutgoingMessage)>;
-    type Error = Never;
-
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        Ok(match *self {
-            Action::Reply(ref mut f) => f.poll()?.map(Some),
-            Action::NoReply(ref mut noreply) => noreply.future.poll()?.map(|_| None),
-        })
-    }
-}
 
 pub struct IncomingFrameHandler {
     handlers: Arc<MessageHandlers>,
