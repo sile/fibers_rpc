@@ -59,15 +59,14 @@ impl IncomingFrameHandler {
 impl HandleFrame for IncomingFrameHandler {
     type Item = ();
     fn handle_frame(&mut self, frame: &Frame) -> Result<Option<Self::Item>> {
-        let seqno = frame.seqno();
-        if let Some(mut handler) = self.handlers.remove(&seqno) {
-            let eos = track!(handler.handle_frame(frame))?.is_some();
-            if eos {
-                Ok(Some(()))
-            } else {
-                self.handlers.insert(seqno, handler);
-                Ok(None)
-            }
+        let eos = if let Some(handler) = self.handlers.get_mut(&frame.seqno()) {
+            track!(handler.handle_frame(frame))?.is_some()
+        } else {
+            false
+        };
+        if eos {
+            self.handlers.remove(&frame.seqno());
+            Ok(Some(()))
         } else {
             Ok(None)
         }
