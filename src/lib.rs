@@ -68,8 +68,10 @@ extern crate fibers;
 extern crate futures;
 #[cfg(feature = "msgpack")]
 extern crate rmp_serde;
-#[cfg(feature = "msgpack")]
+#[cfg(any(feature = "msgpack", feature = "json"))]
 extern crate serde;
+#[cfg(feature = "json")]
+extern crate serde_json;
 #[macro_use]
 extern crate slog;
 #[macro_use]
@@ -98,6 +100,8 @@ use codec::{DefaultDecoderMaker, IntoEncoderMaker, MakeDecoder, MakeEncoder};
 mod client_service;
 mod client_side_channel;
 mod client_side_handlers;
+#[cfg(feature = "json")]
+mod codec_json;
 #[cfg(feature = "msgpack")]
 mod codec_msgpack;
 mod error;

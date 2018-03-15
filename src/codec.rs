@@ -3,6 +3,9 @@ use std::cmp;
 use std::io::{self, Cursor, Read, Write};
 use std::marker::PhantomData;
 
+#[cfg(feature = "json")]
+pub use codec_json::{JsonDecoder, JsonEncoder};
+
 #[cfg(feature = "msgpack")]
 pub use codec_msgpack::{MsgPackDecoder, MsgPackEncoder};
 

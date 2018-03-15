@@ -1,6 +1,8 @@
 use std;
 #[cfg(feature = "msgpack")]
 use rmp_serde;
+#[cfg(feature = "json")]
+use serde_json;
 use trackable::error::{ErrorKind as TrackableErrorKind, ErrorKindExt, Failure, TrackableError};
 
 /// This crate specific `Error` type.
@@ -26,6 +28,12 @@ impl From<rmp_serde::encode::Error> for Error {
 #[cfg(feature = "msgpack")]
 impl From<rmp_serde::decode::Error> for Error {
     fn from(f: rmp_serde::decode::Error) -> Self {
+        ErrorKind::InvalidInput.cause(f).into()
+    }
+}
+#[cfg(feature = "json")]
+impl From<serde_json::Error> for Error {
+    fn from(f: serde_json::Error) -> Self {
         ErrorKind::InvalidInput.cause(f).into()
     }
 }
