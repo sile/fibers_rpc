@@ -3,10 +3,13 @@ use std::cmp;
 use std::io::{self, Cursor, Read, Write};
 use std::marker::PhantomData;
 
-#[cfg(feature = "json")]
+#[cfg(feature = "bincode_codec")]
+pub use codec_bincode::{BincodeDecoder, BincodeEncoder};
+
+#[cfg(feature = "json_codec")]
 pub use codec_json::{JsonDecoder, JsonEncoder};
 
-#[cfg(feature = "msgpack")]
+#[cfg(feature = "msgpack_codec")]
 pub use codec_msgpack::{MsgPackDecoder, MsgPackEncoder};
 
 use {Error, ErrorKind, Result};

@@ -15,6 +15,7 @@ codecov = {repository = "sile/fibers_rpc"}
 
 [dependencies]
 atomic_immut = "0.1"
+bincode = { version = "1", optional = true }
 byteorder = "1"
 fibers = "0.1"
 futures = "0.1"
@@ -30,8 +31,9 @@ clap = "2"
 sloggers = "0.2"
 
 [features]
-msgpack = ["serde", "rmp-serde"]
-json = ["serde", "serde_json"]
+bincode_codec = ["serde", "bincode"]
+json_codec = ["serde", "serde_json"]
+msgpack_codec = ["serde", "rmp-serde"]
 
 [package.metadata.docs.rs]
 all-features = true
