@@ -1,3 +1,4 @@
+use fibers;
 use fibers::net::TcpStream;
 use futures::{Async, Poll, Stream};
 use slog::Logger;
@@ -32,6 +33,7 @@ impl Stream for ServerSideChannel {
     type Error = Error;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
+        let mut count = 0;
         while let Async::Ready(item) = track!(self.message_stream.poll())? {
             if let Some(event) = item {
                 match event {
@@ -55,6 +57,12 @@ impl Stream for ServerSideChannel {
                             return Ok(Async::Ready(Some(action)));
                         }
                     },
+                }
+
+                // FIXME: parameterize
+                count += 1;
+                if count > 64 {
+                    return fibers::fiber::yield_poll();
                 }
             } else {
                 return Ok(Async::Ready(None));

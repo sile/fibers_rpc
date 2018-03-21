@@ -2,6 +2,7 @@ use std::fmt;
 use std::net::SocketAddr;
 use std::sync::mpsc::RecvError;
 use std::time::Duration;
+use fibers;
 use fibers::net::TcpStream;
 use fibers::net::futures::Connect;
 use fibers::time::timer::{self, Timeout};
@@ -173,9 +174,17 @@ impl Future for ClientSideChannel {
         if is_timeout {
             return Ok(Async::Ready(()));
         }
+
+        let mut count = 0;
         while let Async::Ready(next) = track!(self.poll_message_stream())? {
             if let Some(next) = next {
                 self.message_stream = next;
+            }
+
+            // FIXME: parameterize
+            count += 1;
+            if count > 64 {
+                return fibers::fiber::yield_poll();
             }
         }
         Ok(Async::NotReady)
