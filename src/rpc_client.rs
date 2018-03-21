@@ -33,8 +33,6 @@ where
 
     /// Sends the notification message to the RPC server.
     pub fn cast(&self, server: SocketAddr, notification: T::Notification) {
-        // TODO: self.max_concurrency
-
         let encoder = self.encoder_maker.make_encoder(notification);
         let message = Message {
             message: OutgoingMessage::new(Some(T::ID), encoder),
@@ -99,8 +97,6 @@ where
     /// Sends the request message to the RPC server,
     /// and returns a future that represents the response from the server.
     pub fn call(&self, server: SocketAddr, request: T::Req) -> Response<T::Res> {
-        // TODO: self.max_concurrency
-
         let encoder = self.encoder_maker.make_encoder(request);
         let decoder = self.decoder_maker.make_decoder();
         let (handler, response) = ResponseHandler::new(
@@ -160,28 +156,15 @@ pub struct Options {
     /// This is no effect on notification RPC.
     pub timeout: Option<Duration>,
 
-    /// The maximum concurrency of the RPC channel between the client service and the server.
-    ///
-    /// If the channel has ongoing messages more than `concurrency`,
-    /// the RPC will fail with `ErrorKind::Unavailable` error.
-    ///
-    /// The default value is `DEFAULT_MAX_CONCURRENCY`.
-    pub max_concurrency: usize,
-
     /// If it is `true`, RPC chanenl waiting for reconnecting will wake up immediately.
     ///
     /// The defaul value is `false`.
     pub force_wakeup: bool,
 }
-impl Options {
-    /// The default value of the `max_concurrency` field.
-    pub const DEFAULT_MAX_CONCURRENCY: usize = 4096;
-}
 impl Default for Options {
     fn default() -> Self {
         Options {
             timeout: None,
-            max_concurrency: Self::DEFAULT_MAX_CONCURRENCY,
             force_wakeup: false,
         }
     }
