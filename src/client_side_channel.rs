@@ -146,11 +146,15 @@ impl ClientSideChannel {
                         MessageStreamEvent::Sent {
                             seqno,
                             result: Err(e),
+                        } => {
+                            error!(self.logger, "Cannot send message({:?}): {}", seqno, e);
+                            stream.incoming_frame_handler_mut().handle_error(seqno, e);
                         }
-                        | MessageStreamEvent::Received {
+                        MessageStreamEvent::Received {
                             seqno,
                             result: Err(e),
                         } => {
+                            error!(self.logger, "Cannot receive message({:?}): {}", seqno, e);
                             stream.incoming_frame_handler_mut().handle_error(seqno, e);
                         }
                         _ => {}

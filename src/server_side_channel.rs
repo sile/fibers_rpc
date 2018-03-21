@@ -37,14 +37,15 @@ impl Stream for ServerSideChannel {
                 match event {
                     MessageStreamEvent::Sent { seqno, result } => {
                         if let Err(e) = result {
-                            debug!(self.logger, "Failed to send message({:?}): {}", seqno, e);
+                            error!(self.logger, "Failed to send message({:?}): {}", seqno, e);
                         } else {
                             debug!(self.logger, "Completed to send message({:?})", seqno);
                         }
                     }
                     MessageStreamEvent::Received { seqno, result } => match result {
                         Err(e) => {
-                            debug!(self.logger, "Failed to receive message({:?}): {}", seqno, e);
+                            error!(self.logger, "Failed to receive message({:?}): {}", seqno, e);
+                            self.message_stream.send_error_frame(seqno);
                             self.message_stream
                                 .incoming_frame_handler_mut()
                                 .handle_error(seqno, e);

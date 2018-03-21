@@ -1,7 +1,7 @@
 use std::fmt;
 use byteorder::{BigEndian, ByteOrder};
 
-use {ProcedureId, Result};
+use {ErrorKind, ProcedureId, Result};
 use codec::Encode;
 
 /// Message sequence number.
@@ -47,6 +47,13 @@ impl OutgoingMessage {
         OutgoingMessage {
             id,
             encode: Box::new(move |buf| track!(encoder.encode(buf))),
+        }
+    }
+
+    pub fn error() -> Self {
+        OutgoingMessage {
+            id: None,
+            encode: Box::new(|_| track_panic!(ErrorKind::Other)),
         }
     }
 

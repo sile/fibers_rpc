@@ -30,6 +30,11 @@ impl<H: HandleFrame> MessageStream<H> {
         self.outgoing_messages.push_back((seqno, message));
     }
 
+    pub fn send_error_frame(&mut self, seqno: MessageSeqNo) {
+        self.outgoing_messages
+            .push_back((seqno, OutgoingMessage::error()));
+    }
+
     pub fn incoming_frame_handler_mut(&mut self) -> &mut H {
         &mut self.incoming_frame_handler
     }
