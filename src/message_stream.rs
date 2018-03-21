@@ -34,6 +34,10 @@ impl<H: HandleFrame> MessageStream<H> {
         }
     }
 
+    pub fn metrics(&self) -> &ChannelMetrics {
+        &self.metrics
+    }
+
     pub fn send_message(&mut self, seqno: MessageSeqNo, message: OutgoingMessage) {
         self.outgoing_messages.push_back((seqno, message));
         self.metrics.enqueued_outgoing_messages.increment();

@@ -1,7 +1,10 @@
 //! [Prometheus][prometheus] metrics.
 //!
 //! [prometheus]: https://prometheus.io/
+use std::collections::HashMap;
 use prometrics::metrics::{Counter, MetricBuilder};
+
+use ProcedureId;
 
 /// Client side metrics.
 #[derive(Debug, Clone)]
@@ -81,7 +84,64 @@ impl ClientMetrics {
 
 /// Server side metrics.
 #[derive(Debug, Clone)]
-pub struct ServerMetrics {}
+pub struct ServerMetrics {
+    pub(crate) channel: ChannelMetrics,
+    handlers: HashMap<ProcedureId, HandlerMetrics>,
+}
+impl ServerMetrics {
+    /// Returns the metrics of the channels associated with the server.
+    pub fn channel(&self) -> &ChannelMetrics {
+        &self.channel
+    }
+
+    /// Returns the metrics of the handlers registered on the server.
+    pub fn handlers(&self) -> &HashMap<ProcedureId, HandlerMetrics> {
+        &self.handlers
+    }
+
+    pub(crate) fn new(
+        mut builder: MetricBuilder,
+        handlers: HashMap<ProcedureId, HandlerMetrics>,
+    ) -> Self {
+        builder.namespace("fibers_rpc").subsystem("server");
+        ServerMetrics {
+            channel: ChannelMetrics::new(builder.subsystem("channel").label("role", "server")),
+            handlers,
+        }
+    }
+}
+
+/// RPC handler metrics.
+#[derive(Debug, Clone)]
+pub struct HandlerMetrics {
+    pub(crate) rpc_count: Counter,
+}
+impl HandlerMetrics {
+    /// Metric: `fibers_rpc_handler_rpc_tocal { type="call|cast", procedure="${ID}@${NAME}" } <COUNTER>`.
+    pub fn rpc_count(&self) -> u64 {
+        self.rpc_count.value() as u64
+    }
+
+    pub(crate) fn new(
+        mut builder: MetricBuilder,
+        id: ProcedureId,
+        name: &str,
+        rpc_type: &str,
+    ) -> Self {
+        builder.namespace("fibers_rpc").subsystem("handler");
+
+        let procedure = format!("{}@{}", id.0, name);
+        HandlerMetrics {
+            rpc_count: builder
+                .counter("rpc_total")
+                .help("Number of RPCs invoked by clients")
+                .label("procedure", &procedure)
+                .label("type", rpc_type)
+                .finish()
+                .expect("Never fails"),
+        }
+    }
+}
 
 /// RPC channel metrics.
 #[derive(Debug, Clone)]
@@ -130,8 +190,7 @@ impl ChannelMetrics {
         self.dequeued_outgoing_messages.value() as u64
     }
 
-    // TODO: priv
-    pub(crate) fn new(builder: &mut MetricBuilder) -> Self {
+    fn new(builder: &mut MetricBuilder) -> Self {
         ChannelMetrics {
             created_channels: builder
                 .counter("created_channels_total")

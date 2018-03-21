@@ -8,6 +8,7 @@ use frame::HandleFrame;
 use frame_stream::FrameStream;
 use message::{MessageSeqNo, OutgoingMessage};
 use message_stream::{MessageStream, MessageStreamEvent};
+use metrics::ChannelMetrics;
 use server_side_handlers::{Action, IncomingFrameHandler};
 
 #[derive(Debug)]
@@ -16,9 +17,12 @@ pub struct ServerSideChannel {
     message_stream: MessageStream<IncomingFrameHandler>,
 }
 impl ServerSideChannel {
-    pub fn new(logger: Logger, transport_stream: TcpStream, handler: IncomingFrameHandler) -> Self {
-        // TODO:
-        let metrics = ::metrics::ChannelMetrics::new(&mut Default::default());
+    pub fn new(
+        logger: Logger,
+        transport_stream: TcpStream,
+        handler: IncomingFrameHandler,
+        metrics: ChannelMetrics,
+    ) -> Self {
         let message_stream =
             MessageStream::new(FrameStream::new(transport_stream), handler, metrics);
         ServerSideChannel {
@@ -65,6 +69,7 @@ impl Stream for ServerSideChannel {
                 // FIXME: parameterize
                 count += 1;
                 if count > 64 {
+                    self.message_stream.metrics().fiber_yielded.increment();
                     return fibers::fiber::yield_poll();
                 }
             } else {

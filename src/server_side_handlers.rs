@@ -10,6 +10,7 @@ use {Call, Cast, Error, ErrorKind, ProcedureId, Result};
 use codec::{Decode, MakeDecoder, MakeEncoder};
 use frame::{Frame, HandleFrame};
 use message::{MessageSeqNo, OutgoingMessage};
+use metrics::HandlerMetrics;
 
 pub type MessageHandlers = HashMap<ProcedureId, Box<MessageHandlerFactory>>;
 
@@ -236,6 +237,7 @@ pub struct CastHandlerFactory<T, H, D> {
     _rpc: PhantomData<T>,
     handler: Arc<H>,
     decoder_maker: D,
+    metrics: HandlerMetrics,
 }
 impl<T, H, D> CastHandlerFactory<T, H, D>
 where
@@ -243,11 +245,12 @@ where
     H: HandleCast<T>,
     D: MakeDecoder<T::Decoder>,
 {
-    pub fn new(handler: H, decoder_maker: D) -> Self {
+    pub fn new(handler: H, decoder_maker: D, metrics: HandlerMetrics) -> Self {
         CastHandlerFactory {
             _rpc: PhantomData,
             handler: Arc::new(handler),
             decoder_maker,
+            metrics,
         }
     }
 }
@@ -264,6 +267,7 @@ where
             handler: Arc::clone(&self.handler),
             decoder: Some(decoder),
         };
+        self.metrics.rpc_count.increment();
         Box::new(handler)
     }
 }
@@ -295,6 +299,7 @@ pub struct CallHandlerFactory<T, H, D, E> {
     handler: Arc<H>,
     decoder_maker: D,
     encoder_maker: Arc<E>,
+    metrics: HandlerMetrics,
 }
 impl<T, H, D, E> CallHandlerFactory<T, H, D, E>
 where
@@ -303,12 +308,13 @@ where
     D: MakeDecoder<T::ReqDecoder>,
     E: MakeEncoder<T::ResEncoder>,
 {
-    pub fn new(handler: H, decoder_maker: D, encoder_maker: E) -> Self {
+    pub fn new(handler: H, decoder_maker: D, encoder_maker: E, metrics: HandlerMetrics) -> Self {
         CallHandlerFactory {
             _rpc: PhantomData,
             handler: Arc::new(handler),
             decoder_maker,
             encoder_maker: Arc::new(encoder_maker),
+            metrics,
         }
     }
 }
@@ -328,6 +334,7 @@ where
             encoder_maker: Arc::clone(&self.encoder_maker),
             seqno,
         };
+        self.metrics.rpc_count.increment();
         Box::new(handler)
     }
 }

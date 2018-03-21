@@ -8,10 +8,12 @@ use fibers::net::futures::{Connected, TcpListenerBind};
 use fibers::net::streams::Incoming;
 use fibers::sync::mpsc;
 use futures::{Async, Future, Poll, Stream};
+use prometrics::metrics::MetricBuilder;
 
-use {Call, Cast, Error};
+use {Call, Cast, Error, ProcedureId};
 use codec::{DefaultDecoderMaker, IntoEncoderMaker, MakeDecoder, MakeEncoder};
 use message::{MessageSeqNo, OutgoingMessage};
+use metrics::{HandlerMetrics, ServerMetrics};
 use server_side_channel::ServerSideChannel;
 use server_side_handlers::{Action, CallHandlerFactory, CastHandlerFactory, HandleCall, HandleCast,
                            IncomingFrameHandler, MessageHandlers, Never};
@@ -21,6 +23,8 @@ pub struct ServerBuilder {
     bind_addr: SocketAddr,
     logger: Logger,
     handlers: MessageHandlers,
+    metrics: MetricBuilder,
+    handlers_metrics: HashMap<ProcedureId, HandlerMetrics>,
 }
 impl ServerBuilder {
     /// Makes a new `ServerBuilder` instance.
@@ -29,6 +33,8 @@ impl ServerBuilder {
             bind_addr,
             logger: Logger::root(Discard, o!()),
             handlers: HashMap::new(),
+            metrics: MetricBuilder::new(),
+            handlers_metrics: HashMap::new(),
         }
     }
 
@@ -37,6 +43,14 @@ impl ServerBuilder {
     /// The default value is `Logger::root(Discard, o!())`.
     pub fn logger(&mut self, logger: Logger) -> &mut Self {
         self.logger = logger;
+        self
+    }
+
+    /// Sets `MetricBuilder` used by the service.
+    ///
+    /// The default value is `MetricBuilder::new()`.
+    pub fn metrics(&mut self, builder: MetricBuilder) -> &mut Self {
+        self.metrics = builder;
         self
     }
 
@@ -116,7 +130,10 @@ impl ServerBuilder {
             T::NAME
         );
 
-        let handler = CallHandlerFactory::new(handler, decoder_maker, encoder_maker);
+        let metrics = HandlerMetrics::new(self.metrics.clone(), T::ID, T::NAME, "call");
+        self.handlers_metrics.insert(T::ID, metrics.clone());
+
+        let handler = CallHandlerFactory::new(handler, decoder_maker, encoder_maker, metrics);
         self.handlers.insert(T::ID, Box::new(handler));
         self
     }
@@ -155,7 +172,10 @@ impl ServerBuilder {
             T::NAME
         );
 
-        let handler = CastHandlerFactory::new(handler, decoder_maker);
+        let metrics = HandlerMetrics::new(self.metrics.clone(), T::ID, T::NAME, "cast");
+        self.handlers_metrics.insert(T::ID, metrics.clone());
+
+        let handler = CastHandlerFactory::new(handler, decoder_maker, metrics);
         self.handlers.insert(T::ID, Box::new(handler));
         self
     }
@@ -175,6 +195,7 @@ impl ServerBuilder {
             logger,
             spawner,
             incoming_frame_handler: IncomingFrameHandler::new(handlers),
+            metrics: ServerMetrics::new(self.metrics.clone(), self.handlers_metrics.clone()),
         }
     }
 }
@@ -185,6 +206,13 @@ pub struct Server<S> {
     logger: Logger,
     spawner: S,
     incoming_frame_handler: IncomingFrameHandler,
+    metrics: ServerMetrics,
+}
+impl<S> Server<S> {
+    /// Returns the metrics of the server.
+    pub fn metrics(&self) -> &ServerMetrics {
+        &self.metrics
+    }
 }
 impl<S> Future for Server<S>
 where
@@ -199,14 +227,19 @@ where
                 let logger = self.logger.new(o!("client" => addr.to_string()));
                 info!(logger, "New TCP client");
 
+                let metrics = self.metrics.channel.clone();
                 let exit_logger = logger.clone();
                 let spawner = self.spawner.clone().boxed();
                 let incoming_frame_handler = self.incoming_frame_handler.clone();
                 let future = client
                     .map_err(|e| track!(Error::from(e)))
                     .and_then(move |stream| {
-                        let channel =
-                            ServerSideChannel::new(logger, stream, incoming_frame_handler.clone());
+                        let channel = ServerSideChannel::new(
+                            logger,
+                            stream,
+                            incoming_frame_handler.clone(),
+                            metrics,
+                        );
                         ChannelHandler::new(spawner, channel)
                     });
                 self.spawner.spawn(future.then(move |result| {
