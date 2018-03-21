@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fmt;
+use std::sync::Arc;
 use std::time::Duration;
 use fibers::sync::oneshot;
 use fibers::time::timer::{self, Timeout};
@@ -10,6 +11,7 @@ use {Error, ErrorKind, Result};
 use codec::Decode;
 use frame::{Frame, HandleFrame};
 use message::MessageSeqNo;
+use metrics::ClientMetrics;
 
 /// `Future` that represents a response from a RPC server.
 #[derive(Debug)]
@@ -93,13 +95,19 @@ pub type BoxResponseHandler = Box<HandleFrame<Item = ()> + Send + 'static>;
 pub struct ResponseHandler<D: Decode> {
     decoder: Option<D>,
     reply_tx: Option<oneshot::Monitored<D::Message, Error>>,
+    metrics: Arc<ClientMetrics>,
 }
 impl<D: Decode> ResponseHandler<D> {
-    pub fn new(decoder: D, timeout: Option<Duration>) -> (Self, Response<D::Message>) {
+    pub fn new(
+        decoder: D,
+        timeout: Option<Duration>,
+        metrics: Arc<ClientMetrics>,
+    ) -> (Self, Response<D::Message>) {
         let (reply_tx, reply_rx) = oneshot::monitor();
         let handler = ResponseHandler {
             decoder: Some(decoder),
             reply_tx: Some(reply_tx),
+            metrics,
         };
 
         let timeout = timeout.map(timer::timeout);
@@ -119,6 +127,7 @@ impl<D: Decode> HandleFrame for ResponseHandler<D> {
             let response = track!(decoder.finish())?;
             let reply_tx = self.reply_tx.take().expect("Never fails");
             reply_tx.exit(Ok(response));
+            self.metrics.ok_responses.increment();
             Ok(Some(()))
         } else {
             Ok(None)
@@ -127,5 +136,6 @@ impl<D: Decode> HandleFrame for ResponseHandler<D> {
     fn handle_error(&mut self, _seqno: MessageSeqNo, error: Error) {
         let reply_tx = self.reply_tx.take().expect("Never fails");
         reply_tx.exit(Err(error));
+        self.metrics.error_responses.increment();
     }
 }

@@ -8,17 +8,20 @@ use atomic_immut::AtomicImmut;
 use fibers::{BoxSpawn, Spawn};
 use fibers::sync::mpsc;
 use futures::{Async, Future, Poll, Stream};
+use prometrics::metrics::MetricBuilder;
 
 use Error;
 use client_side_channel::{ClientSideChannel, DEFAULT_KEEP_ALIVE_TIMEOUT_SECS};
 use client_side_handlers::BoxResponseHandler;
 use message::OutgoingMessage;
+use metrics::ClientMetrics;
 
 /// `ClientService` builder.
 #[derive(Debug)]
 pub struct ClientServiceBuilder {
     logger: Logger,
     keep_alive_timeout: Duration,
+    metrics: MetricBuilder,
 }
 impl ClientServiceBuilder {
     /// Makes a new `ClientServiceBuilder` instance.
@@ -26,6 +29,7 @@ impl ClientServiceBuilder {
         ClientServiceBuilder {
             logger: Logger::root(Discard, o!()),
             keep_alive_timeout: Duration::from_secs(DEFAULT_KEEP_ALIVE_TIMEOUT_SECS),
+            metrics: MetricBuilder::new(),
         }
     }
 
@@ -48,6 +52,14 @@ impl ClientServiceBuilder {
         self
     }
 
+    /// Sets `MetricBuilder` used by the service.
+    ///
+    /// The default value is `MetricBuilder::new()`.
+    pub fn metrics(&mut self, builder: MetricBuilder) -> &mut Self {
+        self.metrics = builder;
+        self
+    }
+
     /// Builds a new `ClientService` instance.
     pub fn finish<S>(&self, spawner: S) -> ClientService
     where
@@ -55,6 +67,7 @@ impl ClientServiceBuilder {
     {
         let (command_tx, command_rx) = mpsc::channel();
         let channels = Arc::new(AtomicImmut::default());
+        let metrics = ClientMetrics::new(self.metrics.clone());
         ClientService {
             logger: self.logger.clone(),
             spawner: spawner.boxed(),
@@ -62,6 +75,7 @@ impl ClientServiceBuilder {
             command_tx,
             channels: channels.clone(),
             keep_alive_timeout: self.keep_alive_timeout,
+            metrics,
         }
     }
 }
@@ -82,6 +96,7 @@ pub struct ClientService {
     command_tx: mpsc::Sender<Command>,
     channels: Arc<AtomicImmut<HashMap<SocketAddr, ChannelHandle>>>,
     keep_alive_timeout: Duration,
+    metrics: ClientMetrics,
 }
 impl ClientService {
     /// Returns a handle of the service.
@@ -89,6 +104,7 @@ impl ClientService {
         ClientServiceHandle {
             command_tx: self.command_tx.clone(),
             channels: Arc::clone(&self.channels),
+            metrics: Arc::new(self.metrics.clone()),
         }
     }
 
@@ -102,7 +118,8 @@ impl ClientService {
                         info!(logger, "New client-side RPC channel is created");
                         let command_tx = self.command_tx.clone();
                         let mut channels = channels.clone();
-                        let (mut channel, handle) = Channel::new(logger.clone(), server);
+                        let (mut channel, handle) =
+                            Channel::new(logger.clone(), server, self.metrics.clone());
                         channel
                             .inner
                             .set_keep_alive_timeout(self.keep_alive_timeout);
@@ -154,8 +171,14 @@ impl Future for ClientService {
 pub struct ClientServiceHandle {
     command_tx: mpsc::Sender<Command>,
     channels: Arc<AtomicImmut<HashMap<SocketAddr, ChannelHandle>>>,
+    pub(crate) metrics: Arc<ClientMetrics>,
 }
 impl ClientServiceHandle {
+    /// Returns the metrics of the client service.
+    pub fn metrics(&self) -> &ClientMetrics {
+        &self.metrics
+    }
+
     pub(crate) fn send_message(&self, server: SocketAddr, message: Message) {
         if let Some(channel) = self.channels.load().get(&server) {
             channel.send_message(message);
@@ -164,7 +187,9 @@ impl ClientServiceHandle {
                 server,
                 message: Some(message),
             };
-            let _ = self.command_tx.send(command);
+            if self.command_tx.send(command).is_err() {
+                self.metrics.discarded_outgoing_messages.increment();
+            }
         }
     }
 }
@@ -186,9 +211,9 @@ struct Channel {
     message_rx: mpsc::Receiver<Message>,
 }
 impl Channel {
-    fn new(logger: Logger, server: SocketAddr) -> (Self, ChannelHandle) {
+    fn new(logger: Logger, server: SocketAddr, metrics: ClientMetrics) -> (Self, ChannelHandle) {
         let (message_tx, message_rx) = mpsc::channel();
-        let inner = ClientSideChannel::new(logger, server);
+        let inner = ClientSideChannel::new(logger, server, metrics);
         let channel = Channel { inner, message_rx };
         let handle = ChannelHandle { message_tx };
         (channel, handle)

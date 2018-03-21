@@ -2,6 +2,7 @@ extern crate clap;
 extern crate fibers;
 extern crate fibers_rpc;
 extern crate futures;
+extern crate prometrics;
 extern crate sloggers;
 #[macro_use]
 extern crate trackable;
@@ -88,7 +89,8 @@ fn main() {
                         .short("n")
                         .takes_value(true)
                         .default_value("1000"),
-                ),
+                )
+                .arg(Arg::with_name("SHOW_METRICS").long("show-metrics")),
         )
         .get_matches();
 
@@ -194,9 +196,15 @@ fn main() {
             track_try_unwrap!(track_any_err!(finish_rx.recv()));
         }
         let elapsed = start_time.elapsed();
-        let seconds = elapsed.as_secs() as f64 + (elapsed.subsec_nanos() as f64 / 1_000_000_000.0);
+        let seconds =
+            elapsed.as_secs() as f64 + (f64::from(elapsed.subsec_nanos()) / 1_000_000_000.0);
         println!("# ELAPSED: {}", seconds);
         println!("# RPS: {}", requests as f64 / seconds);
+        if matches.is_present("SHOW_METRICS") {
+            let metrics = prometrics::default_gatherer().lock().unwrap().gather();
+            println!("------");
+            println!("{}", metrics.to_text());
+        }
     } else {
         println!("{}", matches.usage());
         std::process::exit(1);

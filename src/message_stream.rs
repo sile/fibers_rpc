@@ -6,6 +6,7 @@ use {Error, ErrorKind, Result};
 use frame::HandleFrame;
 use frame_stream::FrameStream;
 use message::{MessageSeqNo, OutgoingMessage};
+use metrics::ChannelMetrics;
 
 #[derive(Debug)]
 pub struct MessageStream<H: HandleFrame> {
@@ -14,25 +15,34 @@ pub struct MessageStream<H: HandleFrame> {
     incoming_frame_handler: H,
     cancelled_incoming_messages: HashSet<MessageSeqNo>,
     event_queue: VecDeque<MessageStreamEvent<H::Item>>,
+    metrics: ChannelMetrics,
 }
 impl<H: HandleFrame> MessageStream<H> {
-    pub fn new(frame_stream: FrameStream, incoming_frame_handler: H) -> Self {
+    pub fn new(
+        frame_stream: FrameStream,
+        incoming_frame_handler: H,
+        metrics: ChannelMetrics,
+    ) -> Self {
+        metrics.created_channels.increment();
         MessageStream {
             frame_stream,
             outgoing_messages: VecDeque::new(),
             incoming_frame_handler,
             cancelled_incoming_messages: HashSet::new(),
             event_queue: VecDeque::new(),
+            metrics,
         }
     }
 
     pub fn send_message(&mut self, seqno: MessageSeqNo, message: OutgoingMessage) {
         self.outgoing_messages.push_back((seqno, message));
+        self.metrics.enqueued_outgoing_messages.increment();
     }
 
     pub fn send_error_frame(&mut self, seqno: MessageSeqNo) {
         self.outgoing_messages
             .push_back((seqno, OutgoingMessage::error()));
+        self.metrics.enqueued_outgoing_messages.increment();
     }
 
     pub fn incoming_frame_handler_mut(&mut self) -> &mut H {
@@ -51,6 +61,8 @@ impl<H: HandleFrame> MessageStream<H> {
                         result: Err(e),
                     };
                     self.event_queue.push_back(event);
+                    self.metrics.encode_frame_failures.increment();
+                    self.metrics.dequeued_outgoing_messages.increment();
                     did_something = true;
                 }
                 Ok(None) => {
@@ -70,6 +82,7 @@ impl<H: HandleFrame> MessageStream<H> {
                         result: Ok(()),
                     };
                     self.event_queue.push_back(event);
+                    self.metrics.dequeued_outgoing_messages.increment();
                     did_something = true;
                 }
             }
@@ -105,6 +118,7 @@ impl<H: HandleFrame> MessageStream<H> {
                         result: Err(e),
                     };
                     self.event_queue.push_back(event);
+                    self.metrics.encode_frame_failures.increment();
                 }
                 Ok(None) => {}
                 Ok(Some(message)) => {
@@ -142,6 +156,11 @@ impl<H: HandleFrame> Stream for MessageStream<H> {
         } else {
             Ok(Async::NotReady)
         }
+    }
+}
+impl<H: HandleFrame> Drop for MessageStream<H> {
+    fn drop(&mut self) {
+        self.metrics.removed_channels.increment();
     }
 }
 

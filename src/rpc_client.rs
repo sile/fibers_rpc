@@ -1,5 +1,6 @@
 use std::marker::PhantomData;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 
 use {Call, Cast};
@@ -41,6 +42,7 @@ where
             force_wakeup: self.options.force_wakeup,
         };
         self.service.send_message(server, message);
+        self.service.metrics.notifications.increment();
     }
 }
 impl<'a, T, E> CastClient<'a, T, E> {
@@ -101,13 +103,18 @@ where
 
         let encoder = self.encoder_maker.make_encoder(request);
         let decoder = self.decoder_maker.make_decoder();
-        let (handler, response) = ResponseHandler::new(decoder, self.options.timeout);
+        let (handler, response) = ResponseHandler::new(
+            decoder,
+            self.options.timeout,
+            Arc::clone(&self.service.metrics),
+        );
         let message = Message {
             message: OutgoingMessage::new(Some(T::ID), encoder),
             response_handler: Some(Box::new(handler)),
             force_wakeup: self.options.force_wakeup,
         };
         self.service.send_message(server, message);
+        self.service.metrics.requests.increment();
         response
     }
 }

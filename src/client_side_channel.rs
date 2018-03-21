@@ -16,6 +16,7 @@ use frame::HandleFrame;
 use frame_stream::FrameStream;
 use message::{MessageSeqNo, OutgoingMessage};
 use message_stream::{MessageStream, MessageStreamEvent};
+use metrics::ClientMetrics;
 
 pub const DEFAULT_KEEP_ALIVE_TIMEOUT_SECS: u64 = 60 * 10;
 
@@ -27,9 +28,10 @@ pub struct ClientSideChannel {
     next_seqno: MessageSeqNo,
     message_stream: MessageStreamState,
     exponential_backoff: ExponentialBackoff,
+    metrics: ClientMetrics,
 }
 impl ClientSideChannel {
-    pub fn new(logger: Logger, server: SocketAddr) -> Self {
+    pub fn new(logger: Logger, server: SocketAddr, metrics: ClientMetrics) -> Self {
         ClientSideChannel {
             logger,
             server,
@@ -37,6 +39,7 @@ impl ClientSideChannel {
             next_seqno: MessageSeqNo::new_client_side_seqno(),
             message_stream: MessageStreamState::new(server),
             exponential_backoff: ExponentialBackoff::new(),
+            metrics,
         }
     }
 
@@ -106,6 +109,9 @@ impl ClientSideChannel {
             } => match track!(future.poll().map_err(Error::from)) {
                 Err(e) => {
                     error!(self.logger, "Failed to TCP connect: {}", e);
+                    self.metrics
+                        .discarded_outgoing_messages
+                        .add_u64(buffer.len() as u64);
                     let next = Self::wait_or_reconnect(self.server, &mut self.exponential_backoff);
                     Ok(Async::Ready(Some(next)))
                 }
@@ -113,12 +119,15 @@ impl ClientSideChannel {
                 Ok(Async::Ready(stream)) => {
                     info!(
                         self.logger,
-                        "TCP connected: stream={:?}, buffer.len={}",
+                        "TCP connected: stream={:?}, buffered_messages={}",
                         stream,
                         buffer.len()
                     );
-                    let stream =
-                        MessageStream::new(FrameStream::new(stream), IncomingFrameHandler::new());
+                    let stream = MessageStream::new(
+                        FrameStream::new(stream),
+                        IncomingFrameHandler::new(),
+                        self.metrics.channel.clone(),
+                    );
                     let mut connected = MessageStreamState::Connected { stream };
                     for m in buffer.drain(..) {
                         connected.send_message(m.seqno, m.message, m.handler);
@@ -184,6 +193,7 @@ impl Future for ClientSideChannel {
             // FIXME: parameterize
             count += 1;
             if count > 64 {
+                self.metrics.channel.fiber_yielded.increment();
                 return fibers::fiber::yield_poll();
             }
         }

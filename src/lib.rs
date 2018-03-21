@@ -68,6 +68,7 @@ extern crate bincode;
 extern crate byteorder;
 extern crate fibers;
 extern crate futures;
+extern crate prometrics;
 #[cfg(feature = "msgpack_codec")]
 extern crate rmp_serde;
 #[cfg(any(feature = "bincode_codec", feature = "json_codec", feature = "msgpack_codec"))]
@@ -89,6 +90,7 @@ pub mod client {
     pub use client_service::{ClientService, ClientServiceBuilder, ClientServiceHandle};
     pub use rpc_client::{CallClient, CastClient, Options};
 }
+pub mod metrics;
 pub mod server {
     //! RPC server.
 

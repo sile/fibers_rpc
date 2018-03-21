@@ -17,7 +17,10 @@ pub struct ServerSideChannel {
 }
 impl ServerSideChannel {
     pub fn new(logger: Logger, transport_stream: TcpStream, handler: IncomingFrameHandler) -> Self {
-        let message_stream = MessageStream::new(FrameStream::new(transport_stream), handler);
+        // TODO:
+        let metrics = ::metrics::ChannelMetrics::new(&mut Default::default());
+        let message_stream =
+            MessageStream::new(FrameStream::new(transport_stream), handler, metrics);
         ServerSideChannel {
             logger,
             message_stream,
