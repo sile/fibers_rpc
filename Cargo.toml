@@ -1,6 +1,6 @@
 [package]
 name = "fibers_rpc"
-version = "0.1.8"
+version = "0.1.9"
 authors = ["Takeru Ohta <phjgt308@gmail.com>"]
 description = "RPC library built on top of fibers crate"
 homepage = "https://github.com/sile/fibers_rpc"
@@ -18,7 +18,8 @@ atomic_immut = "0.1"
 bincode = { version = "1", optional = true }
 byteorder = "1"
 fibers = "0.1"
-futures = "0.1"
+futures = "= 0.1.18" # TODO: support 0.1.19 or later
+prometrics = "0.1"
 rmp-serde = { version = "0.13", optional = true }
 serde = { version = "1", optional = true }
 serde_derive = { version = "1", optional = true }
