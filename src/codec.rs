@@ -305,12 +305,30 @@ impl<'a> Write for TempBuf<'a> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let size = self.buf.write(buf)?;
         if size < buf.len() {
-            self.extra_buf.extend_from_slice(buf);
+            self.extra_buf.extend_from_slice(&buf[size..]);
         }
         Ok(buf.len())
     }
 
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::io::Write;
+
+    use super::*;
+
+    #[test]
+    fn temp_buf_works() {
+        let mut inner = [0; 1];
+        let mut temp = TempBuf::new(&mut inner);
+
+        temp.write_all(b"abc").unwrap();
+        let (size, extra) = temp.finish();
+        assert_eq!(size, 1);
+        assert_eq!(extra, b"bc");
     }
 }
