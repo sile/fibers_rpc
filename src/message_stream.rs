@@ -161,6 +161,13 @@ impl<H: HandleFrame> Stream for MessageStream<H> {
             }
         }
 
+        // FIXME: parameterize
+        track_assert!(
+            self.outgoing_messages.len() <= 10_000,
+            ErrorKind::Other,
+            "This stream may be overloaded"
+        );
+
         if let Some(event) = self.event_queue.pop_front() {
             Ok(Async::Ready(Some(event)))
         } else {
