@@ -11,7 +11,7 @@ use metrics::ChannelMetrics;
 #[derive(Debug)]
 pub struct MessageStream<H: HandleFrame> {
     frame_stream: FrameStream,
-    outgoing_messages: VecDeque<(MessageSeqNo, OutgoingMessage)>,
+    outgoing_messages: VecDeque<(MessageSeqNo, bool, OutgoingMessage)>,
     incoming_frame_handler: H,
     cancelled_incoming_messages: HashSet<MessageSeqNo>,
     event_queue: VecDeque<MessageStreamEvent<H::Item>>,
@@ -39,13 +39,13 @@ impl<H: HandleFrame> MessageStream<H> {
     }
 
     pub fn send_message(&mut self, seqno: MessageSeqNo, message: OutgoingMessage) {
-        self.outgoing_messages.push_back((seqno, message));
+        self.outgoing_messages.push_back((seqno, false, message));
         self.metrics.enqueued_outgoing_messages.increment();
     }
 
     pub fn send_error_frame(&mut self, seqno: MessageSeqNo) {
         self.outgoing_messages
-            .push_back((seqno, OutgoingMessage::error()));
+            .push_back((seqno, true, OutgoingMessage::error()));
         self.metrics.enqueued_outgoing_messages.increment();
     }
 
@@ -55,28 +55,30 @@ impl<H: HandleFrame> MessageStream<H> {
 
     fn handle_outgoing_messages(&mut self) -> bool {
         let mut did_something = false;
-        while let Some((seqno, mut message)) = self.outgoing_messages.pop_front() {
+        while let Some((seqno, is_error_reply, mut message)) = self.outgoing_messages.pop_front() {
             let result = self.frame_stream
                 .send_frame(seqno, |frame| track!(message.encode(frame.data())));
             match result {
                 Err(e) => {
-                    let event = MessageStreamEvent::Sent {
-                        seqno,
-                        result: Err(e),
-                    };
-                    self.event_queue.push_back(event);
-                    self.metrics.encode_frame_failures.increment();
+                    if !is_error_reply {
+                        let event = MessageStreamEvent::Sent {
+                            seqno,
+                            result: Err(e),
+                        };
+                        self.event_queue.push_back(event);
+                        self.metrics.encode_frame_failures.increment();
+                    }
                     self.metrics.dequeued_outgoing_messages.increment();
                     did_something = true;
                 }
                 Ok(None) => {
                     // The sending buffer is full
-                    self.outgoing_messages.push_front((seqno, message));
+                    self.outgoing_messages.push_front((seqno, false, message));
                     break;
                 }
                 Ok(Some(false)) => {
                     // A part of the message was written to the sending buffer
-                    self.outgoing_messages.push_back((seqno, message));
+                    self.outgoing_messages.push_back((seqno, false, message));
                     did_something = true;
                 }
                 Ok(Some(true)) => {
@@ -110,7 +112,11 @@ impl<H: HandleFrame> MessageStream<H> {
             let result = if frame.is_error() {
                 Err(track!(ErrorKind::InvalidInput.error()).into())
             } else {
-                track!(self.incoming_frame_handler.handle_frame(&frame))
+                track!(
+                    self.incoming_frame_handler.handle_frame(&frame),
+                    "frame.data.len={}",
+                    frame.data().len()
+                )
             };
             match result {
                 Err(e) => {
@@ -122,7 +128,7 @@ impl<H: HandleFrame> MessageStream<H> {
                         result: Err(e),
                     };
                     self.event_queue.push_back(event);
-                    self.metrics.encode_frame_failures.increment();
+                    self.metrics.decode_frame_failures.increment();
                 }
                 Ok(None) => {}
                 Ok(Some(message)) => {
