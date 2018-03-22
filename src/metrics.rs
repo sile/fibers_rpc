@@ -130,7 +130,7 @@ impl HandlerMetrics {
     ) -> Self {
         builder.namespace("fibers_rpc").subsystem("handler");
 
-        let procedure = format!("{}@{}", id.0, name);
+        let procedure = format!("{:08x}@{}", id.0, name);
         HandlerMetrics {
             rpc_count: builder
                 .counter("rpc_total")
