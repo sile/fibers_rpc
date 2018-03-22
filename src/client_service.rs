@@ -88,6 +88,7 @@ impl Default for ClientServiceBuilder {
 /// Client side RPC service.
 ///
 /// This managements TCP connections between clients and servers.
+#[must_use = "futures do nothing unless polled"]
 #[derive(Debug)]
 pub struct ClientService {
     logger: Logger,

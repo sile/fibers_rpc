@@ -201,6 +201,8 @@ impl ServerBuilder {
 }
 
 /// RPC server.
+#[must_use = "futures do nothing unless polled"]
+#[derive(Debug)]
 pub struct Server<S> {
     listener: Listener,
     logger: Logger,
