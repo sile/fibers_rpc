@@ -46,7 +46,7 @@ where
 
         let encoder = self.encoder_maker.make_encoder(notification);
         let message = Message {
-            message: OutgoingMessage::new(Some(T::ID), encoder),
+            message: OutgoingMessage::new(Some(T::ID), self.options.priority, encoder),
             response_handler: None,
             force_wakeup: self.options.force_wakeup,
         };
@@ -130,7 +130,7 @@ where
         );
 
         let message = Message {
-            message: OutgoingMessage::new(Some(T::ID), encoder),
+            message: OutgoingMessage::new(Some(T::ID), self.options.priority, encoder),
             response_handler: Some(Box::new(handler)),
             force_wakeup: self.options.force_wakeup,
         };
@@ -193,6 +193,13 @@ pub struct Options {
     /// The default value is `None` and it means there is no limitation.
     pub max_queue_len: Option<u64>,
 
+    /// The priority of the RPC invocation.
+    ///
+    /// The lower the value, the higher the priority.
+    ///
+    /// The default value is `128`.
+    pub priority: u8,
+
     /// If it is `true`, RPC channel waiting for reconnecting will wake up immediately.
     ///
     /// The defaul value is `false`.
@@ -216,6 +223,7 @@ impl Default for Options {
         Options {
             timeout: None,
             max_queue_len: None,
+            priority: 128,
             force_wakeup: false,
         }
     }

@@ -39,15 +39,17 @@ impl MessageId {
 
 pub struct OutgoingMessage {
     id: Option<ProcedureId>,
+    priority: u8,
     encode: Box<FnMut(&mut [u8]) -> Result<usize> + Send + 'static>,
 }
 impl OutgoingMessage {
-    pub fn new<E>(id: Option<ProcedureId>, mut encoder: E) -> Self
+    pub fn new<E>(id: Option<ProcedureId>, priority: u8, mut encoder: E) -> Self
     where
         E: Encode + Send + 'static,
     {
         OutgoingMessage {
             id,
+            priority,
             encode: Box::new(move |buf| track!(encoder.encode(buf))),
         }
     }
@@ -55,8 +57,13 @@ impl OutgoingMessage {
     pub fn error() -> Self {
         OutgoingMessage {
             id: None,
+            priority: 128,
             encode: Box::new(|_| track_panic!(ErrorKind::Other)),
         }
+    }
+
+    pub fn priority(&self) -> u8 {
+        self.priority
     }
 
     pub fn encode(&mut self, buf: &mut [u8]) -> Result<usize> {
@@ -83,7 +90,7 @@ mod test {
 
     #[test]
     fn message_message_id() {
-        let mut message_id = MessageId::new_client_side_message_id();
+        let mut message_id = MessageId::new_client_side_id();
         assert_eq!(message_id.as_u64(), 0);
 
         let prev = message_id.next();

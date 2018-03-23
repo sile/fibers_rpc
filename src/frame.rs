@@ -4,8 +4,13 @@ use {Error, Result};
 use message::MessageId;
 
 const MAX_FRAME_SIZE: usize = FRAME_HEADER_SIZE + MAX_FRAME_DATA_SIZE;
-const FRAME_HEADER_SIZE: usize = 8 + 1 + 2;
+const FRAME_HEADER_SIZE: usize = POS_DATA_START;
 const MAX_FRAME_DATA_SIZE: usize = 0xFFFF;
+
+const POS_FLAGS: usize = 8;
+const POS_PRIORITY: usize = 9;
+const POS_DATA_LEN_START: usize = 10;
+const POS_DATA_START: usize = 12;
 
 const RECV_BUF_SIZE: usize = MAX_FRAME_SIZE * 4;
 const SEND_BUF_SIZE: usize = MAX_FRAME_SIZE * 2;
@@ -16,11 +21,16 @@ const FLAG_ERROR: u8 = 0b0000_0001;
 pub struct Frame<'a> {
     message_id: MessageId,
     flags: u8,
+    priority: u8,
     data: &'a [u8],
 }
 impl<'a> Frame<'a> {
     pub fn message_id(&self) -> MessageId {
         self.message_id
+    }
+
+    pub fn priority(&self) -> u8 {
+        self.priority
     }
 
     pub fn data(&self) -> &[u8] {
@@ -39,19 +49,21 @@ impl<'a> Frame<'a> {
         if buf.len() < FRAME_HEADER_SIZE {
             FRAME_HEADER_SIZE
         } else {
-            let data_len = BigEndian::read_u16(&buf[9..]) as usize;
+            let data_len = BigEndian::read_u16(&buf[POS_DATA_LEN_START..]) as usize;
             FRAME_HEADER_SIZE + data_len
         }
     }
 
     fn from_bytes(buf: &'a [u8]) -> Self {
         let message_id = MessageId::from_u64(BigEndian::read_u64(buf));
-        let flags = buf[8];
-        let data_len = BigEndian::read_u16(&buf[9..]) as usize;
-        let data = &buf[FRAME_HEADER_SIZE..][..data_len];
+        let flags = buf[POS_FLAGS];
+        let priority = buf[POS_PRIORITY];
+        let data_len = BigEndian::read_u16(&buf[POS_DATA_LEN_START..]) as usize;
+        let data = &buf[POS_DATA_START..][..data_len];
         Frame {
             message_id,
             flags,
+            priority,
             data,
         }
     }
@@ -61,15 +73,16 @@ impl<'a> Frame<'a> {
 pub struct FrameMut<'a>(&'a mut FrameSendBuf);
 impl<'a> FrameMut<'a> {
     pub fn data(&mut self) -> &mut [u8] {
-        &mut self.0.buf[self.0.write_start + FRAME_HEADER_SIZE..][..MAX_FRAME_DATA_SIZE]
+        &mut self.0.buf[self.0.write_start + POS_DATA_START..][..MAX_FRAME_DATA_SIZE]
     }
 
-    pub fn ok(mut self, message_id: MessageId, data_len: usize) -> bool {
+    pub fn ok(mut self, message_id: MessageId, priority: u8, data_len: usize) -> bool {
         debug_assert!(data_len <= MAX_FRAME_DATA_SIZE);
 
         BigEndian::write_u64(self.header(), message_id.as_u64());
-        self.header()[8] = 0;
-        BigEndian::write_u16(&mut self.header()[9..], data_len as u16);
+        self.header()[POS_FLAGS] = 0;
+        self.header()[POS_PRIORITY] = priority;
+        BigEndian::write_u16(&mut self.header()[POS_DATA_LEN_START..], data_len as u16);
 
         self.0.write_start += FRAME_HEADER_SIZE + data_len;
         debug_assert!(self.0.write_start <= self.0.buf.len());
@@ -77,10 +90,11 @@ impl<'a> FrameMut<'a> {
         data_len < MAX_FRAME_DATA_SIZE
     }
 
-    pub fn err(mut self, message_id: MessageId) {
+    pub fn err(mut self, message_id: MessageId, priority: u8) {
         BigEndian::write_u64(self.header(), message_id.as_u64());
-        self.header()[8] = FLAG_ERROR;
-        BigEndian::write_u16(&mut self.header()[9..], 0);
+        self.header()[POS_FLAGS] = FLAG_ERROR;
+        self.header()[POS_PRIORITY] = priority;
+        BigEndian::write_u16(&mut self.header()[POS_DATA_LEN_START..], 0);
 
         self.0.write_start += FRAME_HEADER_SIZE;
         debug_assert!(self.0.write_start <= self.0.buf.len());
@@ -204,6 +218,8 @@ mod test {
     use message::MessageId;
     use super::*;
 
+    const PRIORITY: u8 = 9;
+
     #[test]
     fn send_buf_ok() {
         let mut buf = FrameSendBuf::new();
@@ -214,13 +230,15 @@ mod test {
             let message_id = MessageId::from_u64(0xFF);
             let mut frame = buf.next_frame().unwrap();
             (&mut frame.data()[..3]).copy_from_slice("foo".as_bytes());
-            let end_of_message = frame.ok(message_id, 3);
+            let end_of_message = frame.ok(message_id, PRIORITY, 3);
             assert!(end_of_message);
         }
         assert_eq!(buf.readable_region().len(), FRAME_HEADER_SIZE + 3);
         assert_eq!(
             buf.readable_region(),
-            &[0, 0, 0, 0, 0, 0, 0, 0xFF, 0, 0, 3, b'f', b'o', b'o'][..]
+            &[
+                0, 0, 0, 0, 0, 0, 0, 0xFF, 0, PRIORITY, 0, 3, b'f', b'o', b'o'
+            ][..]
         );
 
         assert!(!buf.is_empty());
@@ -236,12 +254,12 @@ mod test {
             let message_id = MessageId::from_u64(0xFF);
             let mut frame = buf.next_frame().unwrap();
             (&mut frame.data()[..3]).copy_from_slice("bar".as_bytes());
-            frame.err(message_id);
+            frame.err(message_id, PRIORITY);
         }
         assert_eq!(buf.readable_region().len(), FRAME_HEADER_SIZE);
         assert_eq!(
             buf.readable_region(),
-            &[0, 0, 0, 0, 0, 0, 0, 0xFF, FLAG_ERROR, 0, 0][..]
+            &[0, 0, 0, 0, 0, 0, 0, 0xFF, FLAG_ERROR, 9, 0, 0][..]
         );
         buf.consume_readable_region(FRAME_HEADER_SIZE);
         assert!(buf.is_empty());
@@ -254,7 +272,7 @@ mod test {
         {
             let message_id = MessageId::from_u64(0xFF);
             let frame = buf.next_frame().unwrap();
-            let end_of_message = frame.ok(message_id, MAX_FRAME_DATA_SIZE);
+            let end_of_message = frame.ok(message_id, PRIORITY, MAX_FRAME_DATA_SIZE);
             assert!(!end_of_message);
         }
         assert_eq!(buf.readable_region().len(), MAX_FRAME_SIZE);
@@ -263,7 +281,7 @@ mod test {
         {
             let message_id = MessageId::from_u64(0xFF);
             let frame = buf.next_frame().unwrap();
-            let end_of_message = frame.ok(message_id, MAX_FRAME_DATA_SIZE);
+            let end_of_message = frame.ok(message_id, 7, MAX_FRAME_DATA_SIZE);
             assert!(!end_of_message);
         }
         assert_eq!(buf.readable_region().len(), MAX_FRAME_SIZE * 2);
@@ -286,7 +304,11 @@ mod test {
         assert_eq!(buf.writable_region().len(), RECV_BUF_SIZE);
 
         let size = buf.writable_region()
-            .write(&[0, 0, 0, 0, 0, 0, 0, 0xFF, 0, 0, 3, b'f', b'o', b'o'][..])
+            .write(
+                &[
+                    0, 0, 0, 0, 0, 0, 0, 0xFF, 0, PRIORITY, 0, 3, b'f', b'o', b'o'
+                ][..],
+            )
             .unwrap();
         buf.consume_writable_region(size);
         assert_eq!(buf.writable_region().len(), RECV_BUF_SIZE - size);
@@ -294,6 +316,7 @@ mod test {
             let frame = buf.next_frame().unwrap();
             assert_eq!(frame.message_id().as_u64(), 0xFF);
             assert_eq!(frame.data(), b"foo");
+            assert_eq!(frame.priority(), PRIORITY);
             assert!(!frame.is_error());
             assert!(frame.is_end_of_message());
         }
@@ -306,7 +329,7 @@ mod test {
         let mut buf = FrameRecvBuf::new();
 
         let size = buf.writable_region()
-            .write(&[0, 0, 0, 0, 0, 0, 0, 0xFF, 0, 0, 3, b'f'][..])
+            .write(&[0, 0, 0, 0, 0, 0, 0, 0xFF, 0, PRIORITY, 0, 3, b'f'][..])
             .unwrap();
         buf.consume_writable_region(size);
         assert!(buf.next_frame().is_none());
@@ -316,6 +339,7 @@ mod test {
         {
             let frame = buf.next_frame().unwrap();
             assert_eq!(frame.message_id().as_u64(), 0xFF);
+            assert_eq!(frame.priority(), PRIORITY);
             assert_eq!(frame.data(), b"foo");
             assert!(!frame.is_error());
             assert!(frame.is_end_of_message());
@@ -330,7 +354,7 @@ mod test {
 
         for _ in 0..(RECV_BUF_SIZE / MAX_FRAME_SIZE) {
             buf.writable_region()
-                .write_all(&[0, 0, 0, 0, 0, 0, 0, 0xFF, 0, 0xFF, 0xFF][..])
+                .write_all(&[0, 0, 0, 0, 0, 0, 0, 0xFF, 0, PRIORITY, 0xFF, 0xFF][..])
                 .unwrap();
             buf.consume_writable_region(FRAME_HEADER_SIZE);
             buf.writable_region().write_all(&[0; 0xFFFF][..]).unwrap();
@@ -342,6 +366,7 @@ mod test {
             {
                 let frame = buf.next_frame().unwrap();
                 assert_eq!(frame.message_id().as_u64(), 0xFF);
+                assert_eq!(frame.priority(), PRIORITY);
                 assert_eq!(frame.data().len(), 0xFFFF);
                 assert!(!frame.is_error());
                 assert!(!frame.is_end_of_message());
@@ -360,13 +385,13 @@ mod test {
 
         for _ in 0..(RECV_BUF_SIZE / MAX_FRAME_SIZE) - 1 {
             buf.writable_region()
-                .write_all(&[0, 0, 0, 0, 0, 0, 0, 0xFF, 0, 0xFF, 0xFF][..])
+                .write_all(&[0, 0, 0, 0, 0, 0, 0, 0xFF, 0, PRIORITY, 0xFF, 0xFF][..])
                 .unwrap();
             buf.consume_writable_region(FRAME_HEADER_SIZE);
             buf.consume_writable_region(0xFFFF);
         }
         buf.writable_region()
-            .write_all(&[0, 0, 0, 0, 0, 0, 0, 0xFF, 0, 0xFF, 0xF9][..])
+            .write_all(&[0, 0, 0, 0, 0, 0, 0, 0xFF, 0, PRIORITY, 0xFF, 0xF9][..])
             .unwrap();
         buf.consume_writable_region(FRAME_HEADER_SIZE);
         buf.consume_writable_region(0xFFF9);
@@ -383,9 +408,9 @@ mod test {
         assert!(!buf.is_full());
 
         buf.writable_region()
-            .write_all(&[0x77, 0x88, 0, 0, 3, b'f', b'o', b'o'][..])
+            .write_all(&[0x77, 0x88, 0, PRIORITY, 0, 3, b'f', b'o', b'o'][..])
             .unwrap();
-        buf.consume_writable_region(8);
+        buf.consume_writable_region(9);
 
         {
             let frame = buf.next_frame().unwrap();

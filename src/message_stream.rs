@@ -1,4 +1,5 @@
-use std::collections::{HashSet, VecDeque};
+use std::cmp;
+use std::collections::{BinaryHeap, HashSet, VecDeque};
 use futures::{Async, Future, Poll, Stream};
 use trackable::error::ErrorKindExt;
 
@@ -11,11 +12,11 @@ use metrics::ChannelMetrics;
 #[derive(Debug)]
 pub struct MessageStream<H: HandleFrame> {
     frame_stream: FrameStream,
-    outgoing_messages: VecDeque<(MessageSeqNo, bool, OutgoingMessage)>,
+    outgoing_messages: BinaryHeap<SendingMessage>,
     incoming_frame_handler: H,
-    cancelled_incoming_messages: HashSet<MessageSeqNo>,
     cancelled_incoming_messages: HashSet<MessageId>,
     event_queue: VecDeque<MessageStreamEvent<H::Item>>,
+    seqno: u64,
     metrics: ChannelMetrics,
 }
 impl<H: HandleFrame> MessageStream<H> {
@@ -26,10 +27,11 @@ impl<H: HandleFrame> MessageStream<H> {
     ) -> Self {
         MessageStream {
             frame_stream,
-            outgoing_messages: VecDeque::new(),
+            outgoing_messages: BinaryHeap::new(),
             incoming_frame_handler,
             cancelled_incoming_messages: HashSet::new(),
             event_queue: VecDeque::new(),
+            seqno: 0,
             metrics,
         }
     }
@@ -38,14 +40,27 @@ impl<H: HandleFrame> MessageStream<H> {
         &self.metrics
     }
 
-    pub fn send_message(&mut self, seqno: MessageSeqNo, message: OutgoingMessage) {
-        self.outgoing_messages.push_back((seqno, false, message));
+    pub fn send_message(&mut self, message_id: MessageId, message: OutgoingMessage) {
+        let message = SendingMessage {
+            message_id,
+            seqno: self.seqno,
+            is_error: false,
+            message,
+        };
+        self.seqno += 1;
+        self.outgoing_messages.push(message);
         self.metrics.enqueued_outgoing_messages.increment();
     }
 
-    pub fn send_error_frame(&mut self, seqno: MessageSeqNo) {
-        self.outgoing_messages
-            .push_back((seqno, true, OutgoingMessage::error()));
+    pub fn send_error_frame(&mut self, message_id: MessageId) {
+        let message = SendingMessage {
+            message_id,
+            seqno: self.seqno,
+            is_error: true,
+            message: OutgoingMessage::error(),
+        };
+        self.seqno += 1;
+        self.outgoing_messages.push(message);
         self.metrics.enqueued_outgoing_messages.increment();
     }
 
@@ -55,14 +70,17 @@ impl<H: HandleFrame> MessageStream<H> {
 
     fn handle_outgoing_messages(&mut self) -> bool {
         let mut did_something = false;
-        while let Some((seqno, is_error_reply, mut message)) = self.outgoing_messages.pop_front() {
-            let result = self.frame_stream
-                .send_frame(seqno, |frame| track!(message.encode(frame.data())));
+        while let Some(mut sending) = self.outgoing_messages.pop() {
+            let result = self.frame_stream.send_frame(
+                sending.message_id,
+                sending.message.priority(),
+                |frame| track!(sending.message.encode(frame.data())),
+            );
             match result {
                 Err(e) => {
-                    if !is_error_reply {
+                    if !sending.is_error {
                         let event = MessageStreamEvent::Sent {
-                            seqno,
+                            message_id: sending.message_id,
                             result: Err(e),
                         };
                         self.event_queue.push_back(event);
@@ -73,18 +91,20 @@ impl<H: HandleFrame> MessageStream<H> {
                 }
                 Ok(None) => {
                     // The sending buffer is full
-                    self.outgoing_messages.push_front((seqno, false, message));
+                    self.outgoing_messages.push(sending);
                     break;
                 }
                 Ok(Some(false)) => {
                     // A part of the message was written to the sending buffer
-                    self.outgoing_messages.push_back((seqno, false, message));
+                    sending.seqno = self.seqno;
+                    self.seqno += 1;
+                    self.outgoing_messages.push(sending);
                     did_something = true;
                 }
                 Ok(Some(true)) => {
                     // Completed to write the message to the sending buffer
                     let event = MessageStreamEvent::Sent {
-                        seqno,
+                        message_id: sending.message_id,
                         result: Ok(()),
                     };
                     self.event_queue.push_back(event);
@@ -193,5 +213,31 @@ impl<T> MessageStreamEvent<T> {
             MessageStreamEvent::Sent { ref result, .. } => result.is_ok(),
             MessageStreamEvent::Received { ref result, .. } => result.is_ok(),
         }
+    }
+}
+
+#[derive(Debug)]
+struct SendingMessage {
+    message_id: MessageId,
+    seqno: u64,
+    is_error: bool,
+    message: OutgoingMessage,
+}
+impl PartialEq for SendingMessage {
+    fn eq(&self, other: &Self) -> bool {
+        self.message_id == other.message_id
+    }
+}
+impl Eq for SendingMessage {}
+impl PartialOrd for SendingMessage {
+    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for SendingMessage {
+    fn cmp(&self, other: &Self) -> cmp::Ordering {
+        let ordering =
+            (self.message.priority(), self.seqno).cmp(&(other.message.priority(), other.seqno));
+        ordering.reverse()
     }
 }

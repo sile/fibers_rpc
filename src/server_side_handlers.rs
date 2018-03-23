@@ -196,7 +196,7 @@ impl HandleFrame for IncomingFrameHandler {
             .expect("Never fails");
         track!(handler.handle_message(&frame.data()[offset..], frame.is_end_of_message()))?;
         if frame.is_end_of_message() {
-            let action = track!(handler.finish())?;
+            let action = track!(handler.finish(frame.priority()))?;
             Ok(Some(action))
         } else {
             self.runnings.insert(frame.message_id(), handler);
@@ -233,7 +233,7 @@ pub trait MessageHandlerFactory: Send + Sync + 'static {
 
 pub trait HandleMessage: Send + 'static {
     fn handle_message(&mut self, data: &[u8], eos: bool) -> Result<()>;
-    fn finish(&mut self) -> Result<Action>;
+    fn finish(&mut self, priority: u8) -> Result<Action>;
 }
 
 pub struct CastHandlerFactory<T, H, D> {
@@ -289,7 +289,7 @@ where
         let decoder = track_assert_some!(self.decoder.as_mut(), ErrorKind::Other);
         track!(decoder.decode(data, eos))
     }
-    fn finish(&mut self) -> Result<Action> {
+    fn finish(&mut self, _priority: u8) -> Result<Action> {
         let decoder = track_assert_some!(self.decoder.take(), ErrorKind::Other);
         let notification = track!(decoder.finish())?;
         let noreply = self.handler.handle_cast(notification);
@@ -359,14 +359,14 @@ where
         let decoder = track_assert_some!(self.decoder.as_mut(), ErrorKind::Other);
         track!(decoder.decode(data, eos))
     }
-    fn finish(&mut self) -> Result<Action> {
+    fn finish(&mut self, priority: u8) -> Result<Action> {
         let decoder = track_assert_some!(self.decoder.take(), ErrorKind::Other);
         let request = track!(decoder.finish())?;
         let encoder_maker = Arc::clone(&self.encoder_maker);
         let reply = self.handler
             .handle_call(request)
             .boxed(self.message_id, move |v| {
-                OutgoingMessage::new(None, encoder_maker.make_encoder(v))
+                OutgoingMessage::new(None, priority, encoder_maker.make_encoder(v))
             });
         Ok(Action::Reply(reply))
     }

@@ -96,6 +96,12 @@ fn main() {
                         .takes_value(true)
                         .default_value("10000"),
                 )
+                .arg(
+                    Arg::with_name("PRIORITY")
+                        .long("priority")
+                        .takes_value(true)
+                        .default_value("128"),
+                )
                 .arg(Arg::with_name("SHOW_METRICS").long("show-metrics")),
         )
         .get_matches();
@@ -163,6 +169,9 @@ fn main() {
         let max_queue_len: u64 = track_try_unwrap!(track_any_err!(
             matches.value_of("MAX_QUEUE_LEN").unwrap().parse()
         ));
+        let priority: u8 = track_try_unwrap!(track_any_err!(
+            matches.value_of("PRIORITY").unwrap().parse()
+        ));
 
         let service = ClientServiceBuilder::new()
             .logger(logger)
@@ -178,6 +187,7 @@ fn main() {
         );
         let options = RpcOptions {
             max_queue_len: Some(max_queue_len),
+            priority,
             ..RpcOptions::default()
         };
 

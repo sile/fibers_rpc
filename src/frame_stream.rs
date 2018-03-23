@@ -24,18 +24,23 @@ impl FrameStream {
         }
     }
 
-    pub fn send_frame<F>(&mut self, message_id: MessageId, f: F) -> Result<Option<bool>>
+    pub fn send_frame<F>(
+        &mut self,
+        message_id: MessageId,
+        priority: u8,
+        f: F,
+    ) -> Result<Option<bool>>
     where
         F: FnOnce(&mut FrameMut) -> Result<usize>,
     {
         if let Some(mut frame) = self.send_buf.next_frame() {
             match f(&mut frame) {
                 Err(e) => {
-                    frame.err(message_id);
+                    frame.err(message_id, priority);
                     Err(track!(e))
                 }
                 Ok(data_len) => {
-                    let end_of_message = frame.ok(message_id, data_len);
+                    let end_of_message = frame.ok(message_id, priority, data_len);
                     Ok(Some(end_of_message))
                 }
             }
