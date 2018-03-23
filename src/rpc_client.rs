@@ -206,6 +206,9 @@ pub struct Options {
     pub force_wakeup: bool,
 }
 impl Options {
+    /// The default priority.
+    pub const DEFAULT_PRIORITY: u8 = 128;
+
     fn is_allowable_queue_len(&self, metrics: &ClientMetrics, server: SocketAddr) -> bool {
         self.max_queue_len.map_or(true, |max| {
             let queue_len = metrics
@@ -223,7 +226,7 @@ impl Default for Options {
         Options {
             timeout: None,
             max_queue_len: None,
-            priority: 128,
+            priority: Self::DEFAULT_PRIORITY,
             force_wakeup: false,
         }
     }
