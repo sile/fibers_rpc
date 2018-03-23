@@ -204,18 +204,16 @@ impl ChannelsMetrics {
 
     fn new(parent_builder: &MetricBuilder, role: &str) -> Self {
         let mut builder = parent_builder.clone();
-        builder.subsystem("channel");
+        builder.subsystem("channel").label("role", role);
         ChannelsMetrics {
             created_channels: builder
                 .counter("created_channels_total")
                 .help("Number of created RPC channels")
-                .label("role", role)
                 .finish()
                 .expect("Never fails"),
             removed_channels: builder
                 .counter("removed_channels_total")
                 .help("Number of removed RPC channels")
-                .label("role", role)
                 .finish()
                 .expect("Never fails"),
             channels: Arc::new(AtomicImmut::new(HashMap::new())),
