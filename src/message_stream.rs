@@ -23,7 +23,6 @@ impl<H: HandleFrame> MessageStream<H> {
         incoming_frame_handler: H,
         metrics: ChannelMetrics,
     ) -> Self {
-        metrics.created_channels.increment();
         MessageStream {
             frame_stream,
             outgoing_messages: VecDeque::new(),
@@ -173,11 +172,6 @@ impl<H: HandleFrame> Stream for MessageStream<H> {
         } else {
             Ok(Async::NotReady)
         }
-    }
-}
-impl<H: HandleFrame> Drop for MessageStream<H> {
-    fn drop(&mut self) {
-        self.metrics.removed_channels.increment();
     }
 }
 

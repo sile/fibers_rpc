@@ -2,6 +2,9 @@
 //!
 //! [prometheus]: https://prometheus.io/
 use std::collections::HashMap;
+use std::net::SocketAddr;
+use std::sync::{Arc, Mutex};
+use atomic_immut::AtomicImmut;
 use prometrics::metrics::{Counter, MetricBuilder};
 
 use ProcedureId;
@@ -14,7 +17,7 @@ pub struct ClientMetrics {
     pub(crate) ok_responses: Counter,
     pub(crate) error_responses: Counter,
     pub(crate) discarded_outgoing_messages: Counter,
-    pub(crate) channel: ChannelMetrics,
+    channels: ChannelsMetrics,
 }
 impl ClientMetrics {
     /// Metric: `fibers_rpc_client_notifications_total <COUNTER>`.
@@ -43,12 +46,14 @@ impl ClientMetrics {
     }
 
     /// Returns the metrics of the channels associated with the client service.
-    pub fn channel(&self) -> &ChannelMetrics {
-        &self.channel
+    pub fn channels(&self) -> &ChannelsMetrics {
+        &self.channels
     }
 
     pub(crate) fn new(mut builder: MetricBuilder) -> Self {
         builder.namespace("fibers_rpc").subsystem("client");
+        let mut channel_metrics_builder = builder.clone();
+        channel_metrics_builder.subsystem("channel");
         ClientMetrics {
             notifications: builder
                 .counter("notifications_total")
@@ -77,7 +82,7 @@ impl ClientMetrics {
                 .help("Number of discarded messages before sending")
                 .finish()
                 .expect("Never fails"),
-            channel: ChannelMetrics::new(builder.subsystem("channel").label("role", "client")),
+            channels: ChannelsMetrics::new(&builder, "client"),
         }
     }
 }
@@ -85,13 +90,13 @@ impl ClientMetrics {
 /// Server side metrics.
 #[derive(Debug, Clone)]
 pub struct ServerMetrics {
-    pub(crate) channel: ChannelMetrics,
+    channels: ChannelsMetrics,
     handlers: HashMap<ProcedureId, HandlerMetrics>,
 }
 impl ServerMetrics {
     /// Returns the metrics of the channels associated with the server.
-    pub fn channel(&self) -> &ChannelMetrics {
-        &self.channel
+    pub fn channels(&self) -> &ChannelsMetrics {
+        &self.channels
     }
 
     /// Returns the metrics of the handlers registered on the server.
@@ -105,8 +110,8 @@ impl ServerMetrics {
     ) -> Self {
         builder.namespace("fibers_rpc").subsystem("server");
         ServerMetrics {
-            channel: ChannelMetrics::new(builder.subsystem("channel").label("role", "server")),
             handlers,
+            channels: ChannelsMetrics::new(&builder, "server"),
         }
     }
 }
@@ -143,11 +148,85 @@ impl HandlerMetrics {
     }
 }
 
+/// RPC channels metrics.
+#[derive(Debug, Clone)]
+pub struct ChannelsMetrics {
+    channels: Arc<AtomicImmut<HashMap<SocketAddr, ChannelMetrics>>>,
+    builder: Arc<Mutex<MetricBuilder>>,
+    created_channels: Counter,
+    removed_channels: Counter,
+}
+impl ChannelsMetrics {
+    /// Metric: `fibers_rpc_channel_created_channels_total { role="client" } <COUNTER>`.
+    pub fn created_channels(&self) -> u64 {
+        self.created_channels.value() as u64
+    }
+
+    /// Metric: `fibers_rpc_channel_removed_channels_total { role="client" } <COUNTER>`.
+    pub fn removed_channels(&self) -> u64 {
+        self.removed_channels.value() as u64
+    }
+
+    /// Returns a reference to the internal address-to-metrics map.
+    pub fn as_map(&self) -> &Arc<AtomicImmut<HashMap<SocketAddr, ChannelMetrics>>> {
+        &self.channels
+    }
+
+    pub(crate) fn create_channel_metrics(&self, server: SocketAddr) -> ChannelMetrics {
+        if let Some(metrics) = self.channels.load().get(&server).cloned() {
+            return metrics;
+        }
+
+        self.created_channels.increment();
+        let metrics = if let Ok(builder) = self.builder.lock() {
+            ChannelMetrics::new(&builder)
+        } else {
+            ChannelMetrics::new(&MetricBuilder::without_registry())
+        };
+        self.channels.update(|channels| {
+            let mut channels = channels.clone();
+            channels.insert(server, metrics.clone());
+            channels
+        });
+        metrics
+    }
+
+    pub(crate) fn remove_channel_metrics(&self, server: SocketAddr) {
+        if !self.channels.load().contains_key(&server) {
+            return;
+        }
+        self.channels.update(|channels| {
+            let mut channels = channels.clone();
+            channels.remove(&server);
+            channels
+        });
+    }
+
+    fn new(parent_builder: &MetricBuilder, role: &str) -> Self {
+        let mut builder = parent_builder.clone();
+        builder.subsystem("channel");
+        ChannelsMetrics {
+            created_channels: builder
+                .counter("created_channels_total")
+                .help("Number of created RPC channels")
+                .label("role", role)
+                .finish()
+                .expect("Never fails"),
+            removed_channels: builder
+                .counter("removed_channels_total")
+                .help("Number of removed RPC channels")
+                .label("role", role)
+                .finish()
+                .expect("Never fails"),
+            channels: Arc::new(AtomicImmut::new(HashMap::new())),
+            builder: Arc::new(Mutex::new(builder)),
+        }
+    }
+}
+
 /// RPC channel metrics.
 #[derive(Debug, Clone)]
 pub struct ChannelMetrics {
-    pub(crate) created_channels: Counter,
-    pub(crate) removed_channels: Counter,
     pub(crate) fiber_yielded: Counter,
     pub(crate) encode_frame_failures: Counter,
     pub(crate) decode_frame_failures: Counter,
@@ -155,16 +234,6 @@ pub struct ChannelMetrics {
     pub(crate) dequeued_outgoing_messages: Counter,
 }
 impl ChannelMetrics {
-    /// Metric: `fibers_rpc_channel_created_channels_total { role="server|client" } <COUNTER>`.
-    pub fn created_channels(&self) -> u64 {
-        self.created_channels.value() as u64
-    }
-
-    /// Metric: `fibers_rpc_channel_removed_channels_total { role="server|client" } <COUNTER>`.
-    pub fn removed_channels(&self) -> u64 {
-        self.removed_channels.value() as u64
-    }
-
     /// Metric: `fibers_rpc_channel_fiber_yielded_total { role="server|client" } <COUNTER>`.
     pub fn fiber_yielded(&self) -> u64 {
         self.fiber_yielded.value() as u64
@@ -190,18 +259,17 @@ impl ChannelMetrics {
         self.dequeued_outgoing_messages.value() as u64
     }
 
-    fn new(builder: &mut MetricBuilder) -> Self {
+    /// Returns the number of messages in the transmit queue of the channel.
+    ///
+    /// PromQL: `fibers_rpc_channel_enqueued_outgoing_message - fibers_rpc_channel_dequeued_outgoing_messages`
+    pub fn queue_len(&self) -> u64 {
+        let dequeued_messages = self.dequeued_outgoing_messages();
+        let enqueued_messages = self.enqueued_outgoing_messages();
+        enqueued_messages.saturating_sub(dequeued_messages)
+    }
+
+    fn new(builder: &MetricBuilder) -> Self {
         ChannelMetrics {
-            created_channels: builder
-                .counter("created_channels_total")
-                .help("Number of created RPC channels")
-                .finish()
-                .expect("Never fails"),
-            removed_channels: builder
-                .counter("removed_channels_total")
-                .help("Number of removed RPC channels")
-                .finish()
-                .expect("Never fails"),
             fiber_yielded: builder
                 .counter("fiber_yielded_total")
                 .help("Number of `fibers::fiber::yield_poll()` function calls")

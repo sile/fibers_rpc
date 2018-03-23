@@ -229,7 +229,8 @@ where
                 let logger = self.logger.new(o!("client" => addr.to_string()));
                 info!(logger, "New TCP client");
 
-                let metrics = self.metrics.channel.clone();
+                let metrics = self.metrics.channels().create_channel_metrics(addr);
+                let channels = self.metrics.channels().clone();
                 let exit_logger = logger.clone();
                 let spawner = self.spawner.clone().boxed();
                 let incoming_frame_handler = self.incoming_frame_handler.clone();
@@ -245,6 +246,7 @@ where
                         ChannelHandler::new(spawner, channel)
                     });
                 self.spawner.spawn(future.then(move |result| {
+                    channels.remove_channel_metrics(addr);
                     if let Err(e) = result {
                         error!(exit_logger, "TCP connection aborted: {}", e);
                     } else {

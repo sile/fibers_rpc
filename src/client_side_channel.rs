@@ -16,7 +16,7 @@ use frame::HandleFrame;
 use frame_stream::FrameStream;
 use message::{MessageSeqNo, OutgoingMessage};
 use message_stream::{MessageStream, MessageStreamEvent};
-use metrics::ClientMetrics;
+use metrics::{ChannelMetrics, ClientMetrics};
 
 pub const DEFAULT_KEEP_ALIVE_TIMEOUT_SECS: u64 = 60 * 10;
 
@@ -72,7 +72,9 @@ impl ClientSideChannel {
     fn wait_or_reconnect(
         server: SocketAddr,
         backoff: &mut ExponentialBackoff,
+        metrics: &ClientMetrics,
     ) -> MessageStreamState {
+        metrics.channels().remove_channel_metrics(server);
         if let Some(timeout) = backoff.timeout() {
             MessageStreamState::Wait { timeout }
         } else {
@@ -112,7 +114,11 @@ impl ClientSideChannel {
                     self.metrics
                         .discarded_outgoing_messages
                         .add_u64(buffer.len() as u64);
-                    let next = Self::wait_or_reconnect(self.server, &mut self.exponential_backoff);
+                    let next = Self::wait_or_reconnect(
+                        self.server,
+                        &mut self.exponential_backoff,
+                        &self.metrics,
+                    );
                     Ok(Async::Ready(Some(next)))
                 }
                 Ok(Async::NotReady) => Ok(Async::NotReady),
@@ -126,7 +132,7 @@ impl ClientSideChannel {
                     let stream = MessageStream::new(
                         FrameStream::new(stream),
                         IncomingFrameHandler::new(),
-                        self.metrics.channel.clone(),
+                        self.metrics.channels().create_channel_metrics(self.server),
                     );
                     let mut connected = MessageStreamState::Connected { stream };
                     for m in buffer.drain(..) {
@@ -138,13 +144,21 @@ impl ClientSideChannel {
             MessageStreamState::Connected { ref mut stream } => match track!(stream.poll()) {
                 Err(e) => {
                     error!(self.logger, "Message stream aborted: {}", e);
-                    let next = Self::wait_or_reconnect(self.server, &mut self.exponential_backoff);
+                    let next = Self::wait_or_reconnect(
+                        self.server,
+                        &mut self.exponential_backoff,
+                        &self.metrics,
+                    );
                     Ok(Async::Ready(Some(next)))
                 }
                 Ok(Async::NotReady) => Ok(Async::NotReady),
                 Ok(Async::Ready(None)) => {
                     warn!(self.logger, "Message stream terminated");
-                    let next = Self::wait_or_reconnect(self.server, &mut self.exponential_backoff);
+                    let next = Self::wait_or_reconnect(
+                        self.server,
+                        &mut self.exponential_backoff,
+                        &self.metrics,
+                    );
                     Ok(Async::Ready(Some(next)))
                 }
                 Ok(Async::Ready(Some(event))) => {
@@ -193,11 +207,18 @@ impl Future for ClientSideChannel {
             // FIXME: parameterize
             count += 1;
             if count > 64 {
-                self.metrics.channel.fiber_yielded.increment();
+                self.message_stream
+                    .metrics()
+                    .map(|m| m.fiber_yielded.increment());
                 return fibers::fiber::yield_poll();
             }
         }
         Ok(Async::NotReady)
+    }
+}
+impl Drop for ClientSideChannel {
+    fn drop(&mut self) {
+        self.metrics.channels().remove_channel_metrics(self.server);
     }
 }
 
@@ -220,6 +241,13 @@ impl MessageStreamState {
         MessageStreamState::Connecting {
             buffer: Vec::new(),
             future: TcpStream::connect(addr),
+        }
+    }
+
+    fn metrics(&self) -> Option<&ChannelMetrics> {
+        match *self {
+            MessageStreamState::Wait { .. } | MessageStreamState::Connecting { .. } => None,
+            MessageStreamState::Connected { ref stream } => Some(stream.metrics()),
         }
     }
 
