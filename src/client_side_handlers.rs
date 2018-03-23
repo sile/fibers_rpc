@@ -10,7 +10,7 @@ use trackable::error::ErrorKindExt;
 use {Error, ErrorKind, Result};
 use codec::Decode;
 use frame::{Frame, HandleFrame};
-use message::MessageSeqNo;
+use message::MessageId;
 use metrics::ClientMetrics;
 
 /// `Future` that represents a response from a RPC server.
@@ -57,35 +57,39 @@ impl<T> Future for Response<T> {
 
 #[derive(Default)]
 pub struct IncomingFrameHandler {
-    handlers: HashMap<MessageSeqNo, BoxResponseHandler>,
+    handlers: HashMap<MessageId, BoxResponseHandler>,
 }
 impl IncomingFrameHandler {
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn register_response_handler(&mut self, seqno: MessageSeqNo, handler: BoxResponseHandler) {
-        self.handlers.insert(seqno, handler);
+    pub fn register_response_handler(
+        &mut self,
+        message_id: MessageId,
+        handler: BoxResponseHandler,
+    ) {
+        self.handlers.insert(message_id, handler);
     }
 }
 impl HandleFrame for IncomingFrameHandler {
     type Item = ();
     fn handle_frame(&mut self, frame: &Frame) -> Result<Option<Self::Item>> {
-        let eos = if let Some(handler) = self.handlers.get_mut(&frame.seqno()) {
+        let eos = if let Some(handler) = self.handlers.get_mut(&frame.message_id()) {
             track!(handler.handle_frame(frame))?.is_some()
         } else {
             false
         };
         if eos {
-            self.handlers.remove(&frame.seqno());
+            self.handlers.remove(&frame.message_id());
             Ok(Some(()))
         } else {
             Ok(None)
         }
     }
-    fn handle_error(&mut self, seqno: MessageSeqNo, error: Error) {
-        if let Some(mut handler) = self.handlers.remove(&seqno) {
-            handler.handle_error(seqno, error);
+    fn handle_error(&mut self, message_id: MessageId, error: Error) {
+        if let Some(mut handler) = self.handlers.remove(&message_id) {
+            handler.handle_error(message_id, error);
         }
     }
 }
@@ -143,7 +147,7 @@ impl<D: Decode> HandleFrame for ResponseHandler<D> {
             Ok(None)
         }
     }
-    fn handle_error(&mut self, _seqno: MessageSeqNo, error: Error) {
+    fn handle_error(&mut self, _message_id: MessageId, error: Error) {
         let reply_tx = self.reply_tx.take().expect("Never fails");
         reply_tx.exit(Err(error));
         self.metrics.error_responses.increment();

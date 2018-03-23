@@ -5,7 +5,7 @@ use trackable::error::ErrorKindExt;
 use {Error, ErrorKind, Result};
 use frame::HandleFrame;
 use frame_stream::FrameStream;
-use message::{MessageSeqNo, OutgoingMessage};
+use message::{MessageId, OutgoingMessage};
 use metrics::ChannelMetrics;
 
 #[derive(Debug)]
@@ -14,6 +14,7 @@ pub struct MessageStream<H: HandleFrame> {
     outgoing_messages: VecDeque<(MessageSeqNo, bool, OutgoingMessage)>,
     incoming_frame_handler: H,
     cancelled_incoming_messages: HashSet<MessageSeqNo>,
+    cancelled_incoming_messages: HashSet<MessageId>,
     event_queue: VecDeque<MessageStreamEvent<H::Item>>,
     metrics: ChannelMetrics,
 }
@@ -100,10 +101,10 @@ impl<H: HandleFrame> MessageStream<H> {
         while let Some(frame) = self.frame_stream.recv_frame() {
             did_something = true;
 
-            let seqno = frame.seqno();
-            if self.cancelled_incoming_messages.contains(&seqno) {
+            let message_id = frame.message_id();
+            if self.cancelled_incoming_messages.contains(&message_id) {
                 if frame.is_end_of_message() {
-                    self.cancelled_incoming_messages.remove(&seqno);
+                    self.cancelled_incoming_messages.remove(&message_id);
                 }
                 continue;
             }
@@ -120,10 +121,10 @@ impl<H: HandleFrame> MessageStream<H> {
             match result {
                 Err(e) => {
                     if !frame.is_end_of_message() {
-                        self.cancelled_incoming_messages.insert(seqno);
+                        self.cancelled_incoming_messages.insert(message_id);
                     }
                     let event = MessageStreamEvent::Received {
-                        seqno,
+                        message_id,
                         result: Err(e),
                     };
                     self.event_queue.push_back(event);
@@ -132,7 +133,7 @@ impl<H: HandleFrame> MessageStream<H> {
                 Ok(None) => {}
                 Ok(Some(message)) => {
                     let event = MessageStreamEvent::Received {
-                        seqno,
+                        message_id,
                         result: Ok(message),
                     };
                     self.event_queue.push_back(event);
@@ -178,11 +179,11 @@ impl<H: HandleFrame> Stream for MessageStream<H> {
 #[derive(Debug)]
 pub enum MessageStreamEvent<T> {
     Sent {
-        seqno: MessageSeqNo,
+        message_id: MessageId,
         result: Result<()>,
     },
     Received {
-        seqno: MessageSeqNo,
+        message_id: MessageId,
         result: Result<T>,
     },
 }

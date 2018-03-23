@@ -145,7 +145,8 @@ impl ClientService {
             }
             Command::RemoveChannel { server } => {
                 self.channels.update(|channels| {
-                    info!(self.logger, "A client-side RPC channel was deleted"; "peer" => server.to_string());
+                    info!(self.logger, "A client-side RPC channel was deleted";
+                          "peer" => server.to_string());
                     let mut channels = channels.clone();
                     channels.remove(&server);
                     channels

@@ -4,7 +4,7 @@ use futures::{Async, Future, Poll};
 
 use {Error, Result};
 use frame::{Frame, FrameMut, FrameRecvBuf, FrameSendBuf};
-use message::MessageSeqNo;
+use message::MessageId;
 
 #[derive(Debug)]
 pub struct FrameStream {
@@ -24,18 +24,18 @@ impl FrameStream {
         }
     }
 
-    pub fn send_frame<F>(&mut self, seqno: MessageSeqNo, f: F) -> Result<Option<bool>>
+    pub fn send_frame<F>(&mut self, message_id: MessageId, f: F) -> Result<Option<bool>>
     where
         F: FnOnce(&mut FrameMut) -> Result<usize>,
     {
         if let Some(mut frame) = self.send_buf.next_frame() {
             match f(&mut frame) {
                 Err(e) => {
-                    frame.err(seqno);
+                    frame.err(message_id);
                     Err(track!(e))
                 }
                 Ok(data_len) => {
-                    let end_of_message = frame.ok(seqno, data_len);
+                    let end_of_message = frame.ok(message_id, data_len);
                     Ok(Some(end_of_message))
                 }
             }

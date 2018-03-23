@@ -6,7 +6,7 @@ use slog::Logger;
 use Error;
 use frame::HandleFrame;
 use frame_stream::FrameStream;
-use message::{MessageSeqNo, OutgoingMessage};
+use message::{MessageId, OutgoingMessage};
 use message_stream::{MessageStream, MessageStreamEvent};
 use metrics::ChannelMetrics;
 use server_side_handlers::{Action, IncomingFrameHandler};
@@ -31,8 +31,8 @@ impl ServerSideChannel {
         }
     }
 
-    pub fn reply(&mut self, seqno: MessageSeqNo, message: OutgoingMessage) {
-        self.message_stream.send_message(seqno, message);
+    pub fn reply(&mut self, message_id: MessageId, message: OutgoingMessage) {
+        self.message_stream.send_message(message_id, message);
     }
 }
 impl Stream for ServerSideChannel {
@@ -44,23 +44,32 @@ impl Stream for ServerSideChannel {
         while let Async::Ready(item) = track!(self.message_stream.poll())? {
             if let Some(event) = item {
                 match event {
-                    MessageStreamEvent::Sent { seqno, result } => {
+                    MessageStreamEvent::Sent { message_id, result } => {
                         if let Err(e) = result {
-                            error!(self.logger, "Failed to send message({:?}): {}", seqno, e);
+                            error!(
+                                self.logger,
+                                "Failed to send message({:?}): {}", message_id, e
+                            );
                         } else {
-                            debug!(self.logger, "Completed to send message({:?})", seqno);
+                            debug!(self.logger, "Completed to send message({:?})", message_id);
                         }
                     }
-                    MessageStreamEvent::Received { seqno, result } => match result {
+                    MessageStreamEvent::Received { message_id, result } => match result {
                         Err(e) => {
-                            error!(self.logger, "Failed to receive message({:?}): {}", seqno, e);
-                            self.message_stream.send_error_frame(seqno);
+                            error!(
+                                self.logger,
+                                "Failed to receive message({:?}): {}", message_id, e
+                            );
+                            self.message_stream.send_error_frame(message_id);
                             self.message_stream
                                 .incoming_frame_handler_mut()
-                                .handle_error(seqno, e);
+                                .handle_error(message_id, e);
                         }
                         Ok(action) => {
-                            debug!(self.logger, "Completed to receive message({:?})", seqno);
+                            debug!(
+                                self.logger,
+                                "Completed to receive message({:?})", message_id
+                            );
                             return Ok(Async::Ready(Some(action)));
                         }
                     },

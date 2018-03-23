@@ -14,7 +14,7 @@ use {Error, ErrorKind, Result};
 use client_side_handlers::{BoxResponseHandler, IncomingFrameHandler};
 use frame::HandleFrame;
 use frame_stream::FrameStream;
-use message::{MessageSeqNo, OutgoingMessage};
+use message::{MessageId, OutgoingMessage};
 use message_stream::{MessageStream, MessageStreamEvent};
 use metrics::{ChannelMetrics, ClientMetrics};
 
@@ -25,7 +25,7 @@ pub struct ClientSideChannel {
     logger: Logger,
     server: SocketAddr,
     keep_alive: KeepAlive,
-    next_seqno: MessageSeqNo,
+    next_message_id: MessageId,
     message_stream: MessageStreamState,
     exponential_backoff: ExponentialBackoff,
     metrics: ClientMetrics,
@@ -36,7 +36,7 @@ impl ClientSideChannel {
             logger,
             server,
             keep_alive: KeepAlive::new(Duration::from_secs(DEFAULT_KEEP_ALIVE_TIMEOUT_SECS)),
-            next_seqno: MessageSeqNo::new_client_side_seqno(),
+            next_message_id: MessageId::new_client_side_id(),
             message_stream: MessageStreamState::new(server),
             exponential_backoff: ExponentialBackoff::new(),
             metrics,
@@ -52,9 +52,9 @@ impl ClientSideChannel {
         message: OutgoingMessage,
         response_handler: Option<BoxResponseHandler>,
     ) {
-        let seqno = self.next_seqno.next();
+        let message_id = self.next_message_id.next();
         self.message_stream
-            .send_message(seqno, message, response_handler);
+            .send_message(message_id, message, response_handler);
     }
 
     pub fn force_wakeup(&mut self) {
@@ -136,7 +136,7 @@ impl ClientSideChannel {
                     );
                     let mut connected = MessageStreamState::Connected { stream };
                     for m in buffer.drain(..) {
-                        connected.send_message(m.seqno, m.message, m.handler);
+                        connected.send_message(m.message_id, m.message, m.handler);
                     }
                     Ok(Async::Ready(Some(connected)))
                 }
@@ -168,18 +168,25 @@ impl ClientSideChannel {
                     }
                     match event {
                         MessageStreamEvent::Sent {
-                            seqno,
+                            message_id,
                             result: Err(e),
                         } => {
-                            error!(self.logger, "Cannot send message({:?}): {}", seqno, e);
-                            stream.incoming_frame_handler_mut().handle_error(seqno, e);
+                            error!(self.logger, "Cannot send message({:?}): {}", message_id, e);
+                            stream
+                                .incoming_frame_handler_mut()
+                                .handle_error(message_id, e);
                         }
                         MessageStreamEvent::Received {
-                            seqno,
+                            message_id,
                             result: Err(e),
                         } => {
-                            error!(self.logger, "Cannot receive message({:?}): {}", seqno, e);
-                            stream.incoming_frame_handler_mut().handle_error(seqno, e);
+                            error!(
+                                self.logger,
+                                "Cannot receive message({:?}): {}", message_id, e
+                            );
+                            stream
+                                .incoming_frame_handler_mut()
+                                .handle_error(message_id, e);
                         }
                         _ => {}
                     }
@@ -253,7 +260,7 @@ impl MessageStreamState {
 
     fn send_message(
         &mut self,
-        seqno: MessageSeqNo,
+        message_id: MessageId,
         message: OutgoingMessage,
         handler: Option<BoxResponseHandler>,
     ) {
@@ -262,22 +269,22 @@ impl MessageStreamState {
                 if let Some(mut handler) = handler {
                     let e = ErrorKind::Unavailable
                         .cause("TCP stream disconnected (waiting for reconnecting)");
-                    handler.handle_error(seqno, track!(e).into());
+                    handler.handle_error(message_id, track!(e).into());
                 }
             }
             MessageStreamState::Connecting { ref mut buffer, .. } => {
                 buffer.push(BufferedMessage {
-                    seqno,
+                    message_id,
                     message,
                     handler,
                 });
             }
             MessageStreamState::Connected { ref mut stream } => {
-                stream.send_message(seqno, message);
+                stream.send_message(message_id, message);
                 if let Some(handler) = handler {
                     stream
                         .incoming_frame_handler_mut()
-                        .register_response_handler(seqno, handler);
+                        .register_response_handler(message_id, handler);
                 }
             }
         }
@@ -285,13 +292,17 @@ impl MessageStreamState {
 }
 
 struct BufferedMessage {
-    seqno: MessageSeqNo,
+    message_id: MessageId,
     message: OutgoingMessage,
     handler: Option<BoxResponseHandler>,
 }
 impl fmt::Debug for BufferedMessage {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "BufferedMessage {{ seqno: {:?}, .. }}", self.seqno)
+        write!(
+            f,
+            "BufferedMessage {{ message_id: {:?}, .. }}",
+            self.message_id
+        )
     }
 }
 

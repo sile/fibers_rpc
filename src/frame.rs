@@ -1,7 +1,7 @@
 use byteorder::{BigEndian, ByteOrder};
 
 use {Error, Result};
-use message::MessageSeqNo;
+use message::MessageId;
 
 const MAX_FRAME_SIZE: usize = FRAME_HEADER_SIZE + MAX_FRAME_DATA_SIZE;
 const FRAME_HEADER_SIZE: usize = 8 + 1 + 2;
@@ -14,13 +14,13 @@ const FLAG_ERROR: u8 = 0b0000_0001;
 
 #[derive(Debug)]
 pub struct Frame<'a> {
-    seqno: MessageSeqNo,
+    message_id: MessageId,
     flags: u8,
     data: &'a [u8],
 }
 impl<'a> Frame<'a> {
-    pub fn seqno(&self) -> MessageSeqNo {
-        self.seqno
+    pub fn message_id(&self) -> MessageId {
+        self.message_id
     }
 
     pub fn data(&self) -> &[u8] {
@@ -45,11 +45,15 @@ impl<'a> Frame<'a> {
     }
 
     fn from_bytes(buf: &'a [u8]) -> Self {
-        let seqno = MessageSeqNo::from_u64(BigEndian::read_u64(buf));
+        let message_id = MessageId::from_u64(BigEndian::read_u64(buf));
         let flags = buf[8];
         let data_len = BigEndian::read_u16(&buf[9..]) as usize;
         let data = &buf[FRAME_HEADER_SIZE..][..data_len];
-        Frame { seqno, flags, data }
+        Frame {
+            message_id,
+            flags,
+            data,
+        }
     }
 }
 
@@ -60,10 +64,10 @@ impl<'a> FrameMut<'a> {
         &mut self.0.buf[self.0.write_start + FRAME_HEADER_SIZE..][..MAX_FRAME_DATA_SIZE]
     }
 
-    pub fn ok(mut self, seqno: MessageSeqNo, data_len: usize) -> bool {
+    pub fn ok(mut self, message_id: MessageId, data_len: usize) -> bool {
         debug_assert!(data_len <= MAX_FRAME_DATA_SIZE);
 
-        BigEndian::write_u64(self.header(), seqno.as_u64());
+        BigEndian::write_u64(self.header(), message_id.as_u64());
         self.header()[8] = 0;
         BigEndian::write_u16(&mut self.header()[9..], data_len as u16);
 
@@ -73,8 +77,8 @@ impl<'a> FrameMut<'a> {
         data_len < MAX_FRAME_DATA_SIZE
     }
 
-    pub fn err(mut self, seqno: MessageSeqNo) {
-        BigEndian::write_u64(self.header(), seqno.as_u64());
+    pub fn err(mut self, message_id: MessageId) {
+        BigEndian::write_u64(self.header(), message_id.as_u64());
         self.header()[8] = FLAG_ERROR;
         BigEndian::write_u16(&mut self.header()[9..], 0);
 
@@ -91,7 +95,7 @@ pub trait HandleFrame {
     type Item;
 
     fn handle_frame(&mut self, frame: &Frame) -> Result<Option<Self::Item>>;
-    fn handle_error(&mut self, seqno: MessageSeqNo, error: Error);
+    fn handle_error(&mut self, message_id: MessageId, error: Error);
 }
 
 #[derive(Debug)]
@@ -197,7 +201,7 @@ impl FrameSendBuf {
 mod test {
     use std::io::Write;
 
-    use message::MessageSeqNo;
+    use message::MessageId;
     use super::*;
 
     #[test]
@@ -207,10 +211,10 @@ mod test {
         assert!(buf.readable_region().is_empty());
 
         {
-            let seqno = MessageSeqNo::from_u64(0xFF);
+            let message_id = MessageId::from_u64(0xFF);
             let mut frame = buf.next_frame().unwrap();
             (&mut frame.data()[..3]).copy_from_slice("foo".as_bytes());
-            let end_of_message = frame.ok(seqno, 3);
+            let end_of_message = frame.ok(message_id, 3);
             assert!(end_of_message);
         }
         assert_eq!(buf.readable_region().len(), FRAME_HEADER_SIZE + 3);
@@ -229,10 +233,10 @@ mod test {
     fn send_buf_error() {
         let mut buf = FrameSendBuf::new();
         {
-            let seqno = MessageSeqNo::from_u64(0xFF);
+            let message_id = MessageId::from_u64(0xFF);
             let mut frame = buf.next_frame().unwrap();
             (&mut frame.data()[..3]).copy_from_slice("bar".as_bytes());
-            frame.err(seqno);
+            frame.err(message_id);
         }
         assert_eq!(buf.readable_region().len(), FRAME_HEADER_SIZE);
         assert_eq!(
@@ -248,18 +252,18 @@ mod test {
         let mut buf = FrameSendBuf::new();
 
         {
-            let seqno = MessageSeqNo::from_u64(0xFF);
+            let message_id = MessageId::from_u64(0xFF);
             let frame = buf.next_frame().unwrap();
-            let end_of_message = frame.ok(seqno, MAX_FRAME_DATA_SIZE);
+            let end_of_message = frame.ok(message_id, MAX_FRAME_DATA_SIZE);
             assert!(!end_of_message);
         }
         assert_eq!(buf.readable_region().len(), MAX_FRAME_SIZE);
         assert!(!buf.is_empty());
 
         {
-            let seqno = MessageSeqNo::from_u64(0xFF);
+            let message_id = MessageId::from_u64(0xFF);
             let frame = buf.next_frame().unwrap();
-            let end_of_message = frame.ok(seqno, MAX_FRAME_DATA_SIZE);
+            let end_of_message = frame.ok(message_id, MAX_FRAME_DATA_SIZE);
             assert!(!end_of_message);
         }
         assert_eq!(buf.readable_region().len(), MAX_FRAME_SIZE * 2);
@@ -288,7 +292,7 @@ mod test {
         assert_eq!(buf.writable_region().len(), RECV_BUF_SIZE - size);
         {
             let frame = buf.next_frame().unwrap();
-            assert_eq!(frame.seqno().as_u64(), 0xFF);
+            assert_eq!(frame.message_id().as_u64(), 0xFF);
             assert_eq!(frame.data(), b"foo");
             assert!(!frame.is_error());
             assert!(frame.is_end_of_message());
@@ -311,7 +315,7 @@ mod test {
         buf.consume_writable_region(size);
         {
             let frame = buf.next_frame().unwrap();
-            assert_eq!(frame.seqno().as_u64(), 0xFF);
+            assert_eq!(frame.message_id().as_u64(), 0xFF);
             assert_eq!(frame.data(), b"foo");
             assert!(!frame.is_error());
             assert!(frame.is_end_of_message());
@@ -337,7 +341,7 @@ mod test {
         for _ in 0..(RECV_BUF_SIZE / MAX_FRAME_SIZE) - 1 {
             {
                 let frame = buf.next_frame().unwrap();
-                assert_eq!(frame.seqno().as_u64(), 0xFF);
+                assert_eq!(frame.message_id().as_u64(), 0xFF);
                 assert_eq!(frame.data().len(), 0xFFFF);
                 assert!(!frame.is_error());
                 assert!(!frame.is_end_of_message());
@@ -385,7 +389,7 @@ mod test {
 
         {
             let frame = buf.next_frame().unwrap();
-            assert_eq!(frame.seqno().as_u64(), 0x1122_3344_5566_7788);
+            assert_eq!(frame.message_id().as_u64(), 0x1122_3344_5566_7788);
             assert_eq!(frame.data(), b"foo");
             assert!(!frame.is_error());
             assert!(frame.is_end_of_message());

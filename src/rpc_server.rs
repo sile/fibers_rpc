@@ -12,7 +12,7 @@ use prometrics::metrics::MetricBuilder;
 
 use {Call, Cast, Error, ProcedureId};
 use codec::{DefaultDecoderMaker, IntoEncoderMaker, MakeDecoder, MakeEncoder};
-use message::{MessageSeqNo, OutgoingMessage};
+use message::{MessageId, OutgoingMessage};
 use metrics::{HandlerMetrics, ServerMetrics};
 use server_side_channel::ServerSideChannel;
 use server_side_handlers::{Action, CallHandlerFactory, CastHandlerFactory, HandleCall, HandleCast,
@@ -266,8 +266,8 @@ where
 struct ChannelHandler {
     spawner: BoxSpawn,
     channel: ServerSideChannel,
-    reply_tx: mpsc::Sender<(MessageSeqNo, OutgoingMessage)>,
-    reply_rx: mpsc::Receiver<(MessageSeqNo, OutgoingMessage)>,
+    reply_tx: mpsc::Sender<(MessageId, OutgoingMessage)>,
+    reply_rx: mpsc::Receiver<(MessageId, OutgoingMessage)>,
 }
 impl ChannelHandler {
     fn new(spawner: BoxSpawn, channel: ServerSideChannel) -> Self {
@@ -295,12 +295,12 @@ impl Future for ChannelHandler {
                             }
                         }
                         Action::Reply(mut reply) => {
-                            if let Some((seqno, message)) = reply.try_take() {
-                                self.channel.reply(seqno, message);
+                            if let Some((message_id, message)) = reply.try_take() {
+                                self.channel.reply(message_id, message);
                             } else {
                                 let reply_tx = self.reply_tx.clone();
-                                let future = reply.map(move |(seqno, message)| {
-                                    let _ = reply_tx.send((seqno, message));
+                                let future = reply.map(move |(message_id, message)| {
+                                    let _ = reply_tx.send((message_id, message));
                                 });
                                 self.spawner.spawn(future.map_err(|_: Never| ()));
                             }
@@ -313,8 +313,8 @@ impl Future for ChannelHandler {
 
             let mut do_break = true;
             while let Async::Ready(item) = self.reply_rx.poll().expect("Never fails") {
-                let (seqno, message) = item.expect("Never fails");
-                self.channel.reply(seqno, message);
+                let (message_id, message) = item.expect("Never fails");
+                self.channel.reply(message_id, message);
                 do_break = false;
             }
             if do_break {
