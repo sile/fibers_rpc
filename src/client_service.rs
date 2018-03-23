@@ -180,17 +180,15 @@ impl ClientServiceHandle {
         &self.metrics
     }
 
-    pub(crate) fn send_message(&self, server: SocketAddr, message: Message) {
+    pub(crate) fn send_message(&self, server: SocketAddr, message: Message) -> bool {
         if let Some(channel) = self.channels.load().get(&server) {
-            channel.send_message(message);
+            channel.send_message(message)
         } else {
             let command = Command::CreateChannel {
                 server,
                 message: Some(message),
             };
-            if self.command_tx.send(command).is_err() {
-                self.metrics.discarded_outgoing_messages.increment();
-            }
+            self.command_tx.send(command).is_ok()
         }
     }
 }
@@ -244,8 +242,8 @@ struct ChannelHandle {
     message_tx: mpsc::Sender<Message>,
 }
 impl ChannelHandle {
-    pub fn send_message(&self, message: Message) {
-        let _ = self.message_tx.send(message);
+    pub fn send_message(&self, message: Message) -> bool {
+        self.message_tx.send(message).is_ok()
     }
 }
 

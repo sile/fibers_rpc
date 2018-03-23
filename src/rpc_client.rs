@@ -2,12 +2,14 @@ use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
+use trackable::error::ErrorKindExt;
 
-use {Call, Cast};
+use {Call, Cast, ErrorKind};
 use client_service::{ClientServiceHandle, Message};
 use client_side_handlers::{Response, ResponseHandler};
 use codec::{MakeDecoder, MakeEncoder};
 use message::OutgoingMessage;
+use metrics::ClientMetrics;
 
 /// Client for notification RPC.
 #[derive(Debug)]
@@ -32,15 +34,29 @@ where
     }
 
     /// Sends the notification message to the RPC server.
-    pub fn cast(&self, server: SocketAddr, notification: T::Notification) {
+    ///
+    /// If the message is discarded before sending, this method will return `false`.
+    pub fn cast(&self, server: SocketAddr, notification: T::Notification) -> bool {
+        if !self.options
+            .is_allowable_queue_len(&self.service.metrics, server)
+        {
+            self.service.metrics.discarded_outgoing_messages.increment();
+            return false;
+        }
+
         let encoder = self.encoder_maker.make_encoder(notification);
         let message = Message {
             message: OutgoingMessage::new(Some(T::ID), encoder),
             response_handler: None,
             force_wakeup: self.options.force_wakeup,
         };
-        self.service.send_message(server, message);
+        if !self.service.send_message(server, message) {
+            self.service.metrics.discarded_outgoing_messages.increment();
+            return false;
+        }
+
         self.service.metrics.notifications.increment();
+        true
     }
 }
 impl<'a, T, E> CastClient<'a, T, E> {
@@ -97,6 +113,14 @@ where
     /// Sends the request message to the RPC server,
     /// and returns a future that represents the response from the server.
     pub fn call(&self, server: SocketAddr, request: T::Req) -> Response<T::Res> {
+        if !self.options
+            .is_allowable_queue_len(&self.service.metrics, server)
+        {
+            self.service.metrics.discarded_outgoing_messages.increment();
+            let e = track!(ErrorKind::Unavailable.cause("too long transmit queue"));
+            return Response::error(e.into());
+        }
+
         let encoder = self.encoder_maker.make_encoder(request);
         let decoder = self.decoder_maker.make_decoder();
         let (handler, response) = ResponseHandler::new(
@@ -104,12 +128,18 @@ where
             self.options.timeout,
             Arc::clone(&self.service.metrics),
         );
+
         let message = Message {
             message: OutgoingMessage::new(Some(T::ID), encoder),
             response_handler: Some(Box::new(handler)),
             force_wakeup: self.options.force_wakeup,
         };
-        self.service.send_message(server, message);
+
+        if !self.service.send_message(server, message) {
+            self.service.metrics.discarded_outgoing_messages.increment();
+            let e = track!(ErrorKind::Unavailable.cause("client service or server is unavailable"));
+            return Response::error(e.into());
+        }
         self.service.metrics.requests.increment();
         response
     }
@@ -156,15 +186,36 @@ pub struct Options {
     /// This is no effect on notification RPC.
     pub timeout: Option<Duration>,
 
-    /// If it is `true`, RPC chanenl waiting for reconnecting will wake up immediately.
+    /// The allowable number of messages in the transmit queue.
+    ///
+    /// If the current queue length exceeds this value, the new message will be discarded before sending.
+    ///
+    /// The default value is `None` and it means there is no limitation.
+    pub max_queue_len: Option<u64>,
+
+    /// If it is `true`, RPC channel waiting for reconnecting will wake up immediately.
     ///
     /// The defaul value is `false`.
     pub force_wakeup: bool,
+}
+impl Options {
+    fn is_allowable_queue_len(&self, metrics: &ClientMetrics, server: SocketAddr) -> bool {
+        self.max_queue_len.map_or(true, |max| {
+            let queue_len = metrics
+                .channels()
+                .as_map()
+                .load()
+                .get(&server)
+                .map_or(0, |channel| channel.queue_len());
+            queue_len <= max
+        })
+    }
 }
 impl Default for Options {
     fn default() -> Self {
         Options {
             timeout: None,
+            max_queue_len: None,
             force_wakeup: false,
         }
     }

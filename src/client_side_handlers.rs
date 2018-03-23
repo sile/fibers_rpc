@@ -19,6 +19,16 @@ pub struct Response<T> {
     reply_rx: oneshot::Monitor<T, Error>,
     timeout: Option<Timeout>,
 }
+impl<T> Response<T> {
+    pub(crate) fn error(e: Error) -> Self {
+        let (tx, rx) = oneshot::monitor();
+        tx.exit(Err(e));
+        Response {
+            reply_rx: rx,
+            timeout: None,
+        }
+    }
+}
 impl<T> Future for Response<T> {
     type Item = T;
     type Error = Error;

@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use clap::{App, Arg, SubCommand};
 use fibers::{Executor, Spawn, ThreadPoolExecutor};
 use fibers_rpc::{Call, ProcedureId};
-use fibers_rpc::client::{ClientServiceBuilder, ClientServiceHandle};
+use fibers_rpc::client::{ClientServiceBuilder, ClientServiceHandle, Options as RpcOptions};
 use fibers_rpc::codec::BytesEncoder;
 use fibers_rpc::server::{HandleCall, Reply, ServerBuilder};
 use futures::{Async, Future, Poll};
@@ -90,6 +90,12 @@ fn main() {
                         .takes_value(true)
                         .default_value("1000"),
                 )
+                .arg(
+                    Arg::with_name("MAX_QUEUE_LEN")
+                        .long("max-queue-len")
+                        .takes_value(true)
+                        .default_value("10000"),
+                )
                 .arg(Arg::with_name("SHOW_METRICS").long("show-metrics")),
         )
         .get_matches();
@@ -154,6 +160,9 @@ fn main() {
         let requests: usize = track_try_unwrap!(track_any_err!(
             matches.value_of("REQUESTS").unwrap().parse()
         ));
+        let max_queue_len: u64 = track_try_unwrap!(track_any_err!(
+            matches.value_of("MAX_QUEUE_LEN").unwrap().parse()
+        ));
 
         let service = ClientServiceBuilder::new()
             .logger(logger)
@@ -167,6 +176,10 @@ fn main() {
                 .read_to_end(&mut buf)
                 .map_err(Failure::from_error)
         );
+        let options = RpcOptions {
+            max_queue_len: Some(max_queue_len),
+            ..RpcOptions::default()
+        };
 
         let (finish_tx, finish_rx) = std::sync::mpsc::channel();
         let start_time = Instant::now();
@@ -177,6 +190,7 @@ fn main() {
                 step: concurrency,
                 n: requests,
                 input: buf.clone(),
+                options: options.clone(),
                 service: client_service.clone(),
                 server: addr,
                 future: None,
@@ -217,6 +231,7 @@ struct Bench {
     n: usize,
     service: ClientServiceHandle,
     server: std::net::SocketAddr,
+    options: RpcOptions,
     input: Vec<u8>,
     future: Option<fibers_rpc::client::Response<Vec<u8>>>,
 }
@@ -231,7 +246,8 @@ impl Future for Bench {
                     return Ok(Async::Ready(()));
                 }
 
-                let client = EchoRpc::client(&self.service);
+                let mut client = EchoRpc::client(&self.service);
+                *client.options_mut() = self.options.clone();
                 let future = client.call(self.server, self.input.clone());
                 self.future = Some(future);
                 self.i += self.step;
