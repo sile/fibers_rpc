@@ -1,8 +1,8 @@
 use std::fmt;
+use bytecodec::{Encode, EncodeBuf};
 use byteorder::{BigEndian, ByteOrder};
 
 use {ErrorKind, ProcedureId, Result};
-use codec::Encode;
 
 /// Message identifier.
 ///
@@ -40,7 +40,7 @@ impl MessageId {
 pub struct OutgoingMessage {
     id: Option<ProcedureId>,
     priority: u8,
-    encode: Box<FnMut(&mut [u8]) -> Result<usize> + Send + 'static>,
+    encode: Box<FnMut(&mut EncodeBuf) -> Result<()> + Send + 'static>,
 }
 impl OutgoingMessage {
     pub fn new<E>(id: Option<ProcedureId>, priority: u8, mut encoder: E) -> Self
@@ -50,7 +50,10 @@ impl OutgoingMessage {
         OutgoingMessage {
             id,
             priority,
-            encode: Box::new(move |buf| track!(encoder.encode(buf))),
+            encode: Box::new(move |buf| {
+                let message = track!(encoder.encode(buf))?;
+                Ok(message)
+            }),
         }
     }
 
@@ -73,7 +76,11 @@ impl OutgoingMessage {
         } else {
             0
         };
-        track!((self.encode)(&mut buf[offset..])).map(|size| offset + size)
+        // TODO:
+        let mut buf = EncodeBuf::new(&mut buf[offset..]);
+        let buf_len = buf.len();
+        track!((self.encode)(&mut buf))?;
+        Ok(offset + (buf_len - buf.len()))
     }
 }
 impl fmt::Debug for OutgoingMessage {

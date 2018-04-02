@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::mem;
 use std::net::SocketAddr;
 use slog::{Discard, Logger};
+use factory::{DefaultFactory, Factory};
 use fibers::{BoxSpawn, Spawn};
 use fibers::net::TcpListener;
 use fibers::net::futures::{Connected, TcpListenerBind};
@@ -11,7 +12,6 @@ use futures::{Async, Future, Poll, Stream};
 use prometrics::metrics::MetricBuilder;
 
 use {Call, Cast, Error, ProcedureId};
-use codec::{DefaultDecoderMaker, IntoEncoderMaker, MakeDecoder, MakeEncoder};
 use message::{MessageId, OutgoingMessage};
 use metrics::{HandlerMetrics, ServerMetrics};
 use server_side_channel::ServerSideChannel;
@@ -56,6 +56,8 @@ impl ServerBuilder {
 
     /// Registers a handler for the request/response RPC.
     ///
+    /// TODO: update doc
+    ///
     /// This equivalent to
     /// `call_handler_with_codec(handler, DefaultDecoderMaker::new(), IntoEncoderMaker::new())`.
     ///
@@ -65,14 +67,17 @@ impl ServerBuilder {
     pub fn call_handler<T, H>(&mut self, handler: H) -> &mut Self
     where
         T: Call,
+        T::Req: Send, // TODO: delete
         H: HandleCall<T>,
         T::ReqDecoder: Default,
-        T::Res: Into<T::ResEncoder>,
+        T::ResEncoder: Default,
     {
-        self.call_handler_with_codec(handler, DefaultDecoderMaker::new(), IntoEncoderMaker::new())
+        self.call_handler_with_codec(handler, DefaultFactory::new(), DefaultFactory::new())
     }
 
     /// Registers a handler (with the given decoder maker) for the request/response RPC.
+    ///
+    /// TODO: update doc
     ///
     /// This equivalent to `call_handler_with_codec(handler, decoder_maker, IntoEncoderMaker::new())`.
     ///
@@ -82,14 +87,17 @@ impl ServerBuilder {
     pub fn call_handler_with_decoder<T, H, D>(&mut self, handler: H, decoder_maker: D) -> &mut Self
     where
         T: Call,
+        T::Req: Send, // TODO: delete
         H: HandleCall<T>,
-        D: MakeDecoder<T::ReqDecoder>,
-        T::Res: Into<T::ResEncoder>,
+        D: Factory<Item = T::ReqDecoder> + Send + Sync + 'static,
+        T::ResEncoder: Default,
     {
-        self.call_handler_with_codec(handler, decoder_maker, IntoEncoderMaker::new())
+        self.call_handler_with_codec(handler, decoder_maker, DefaultFactory::new())
     }
 
     /// Registers a handler (with the given encoder maker) for the request/response RPC.
+    ///
+    /// TODO: update doc
     ///
     /// This equivalent to `call_handler_with_codec(handler, DefaultDecoderMaker::new(), encoder_maker)`.
     ///
@@ -99,11 +107,12 @@ impl ServerBuilder {
     pub fn call_handler_with_encoder<T, H, E>(&mut self, handler: H, encoder_maker: E) -> &mut Self
     where
         T: Call,
+        T::Req: Send, // TODO: delete
         H: HandleCall<T>,
-        E: MakeEncoder<T::ResEncoder>,
+        E: Factory<Item = T::ResEncoder> + Send + Sync + 'static,
         T::ReqDecoder: Default,
     {
-        self.call_handler_with_codec(handler, DefaultDecoderMaker::new(), encoder_maker)
+        self.call_handler_with_codec(handler, DefaultFactory::new(), encoder_maker)
     }
 
     /// Registers a handler (with the given decoder/encoder makers) for the request/response RPC.
@@ -119,9 +128,10 @@ impl ServerBuilder {
     ) -> &mut Self
     where
         T: Call,
+        T::Req: Send, // TODO: delete
         H: HandleCall<T>,
-        D: MakeDecoder<T::ReqDecoder>,
-        E: MakeEncoder<T::ResEncoder>,
+        D: Factory<Item = T::ReqDecoder> + Send + Sync + 'static,
+        E: Factory<Item = T::ResEncoder> + Send + Sync + 'static,
     {
         assert!(
             !self.handlers.contains_key(&T::ID),
@@ -140,6 +150,8 @@ impl ServerBuilder {
 
     /// Registers a handler for the notification RPC.
     ///
+    /// TODO: update doc
+    ///
     /// This equivalent to `cast_handler_with_encoder(handler, DefaultDecoderMaker::new())`.
     ///
     /// # Panices
@@ -148,10 +160,11 @@ impl ServerBuilder {
     pub fn cast_handler<T, H>(&mut self, handler: H) -> &mut Self
     where
         T: Cast,
+        T::Notification: Send, // TODO: delete
         H: HandleCast<T>,
         T::Decoder: Default,
     {
-        self.cast_handler_with_decoder(handler, DefaultDecoderMaker::new())
+        self.cast_handler_with_decoder(handler, DefaultFactory::new())
     }
 
     /// Registers a handler (with the given decoder maker) for the notification RPC.
@@ -162,8 +175,9 @@ impl ServerBuilder {
     pub fn cast_handler_with_decoder<T, H, D>(&mut self, handler: H, decoder_maker: D) -> &mut Self
     where
         T: Cast,
+        T::Notification: Send, // TODO: delete
         H: HandleCast<T>,
-        D: MakeDecoder<T::Decoder>,
+        D: Factory<Item = T::Decoder> + Send + Sync + 'static,
     {
         assert!(
             !self.handlers.contains_key(&T::ID),

@@ -76,7 +76,7 @@ extern crate trackable;
 
 pub use error::{Error, ErrorKind};
 
-pub mod codec;
+// pub mod codec; TODO: delete
 pub mod client {
     //! RPC client.
 
@@ -93,7 +93,6 @@ pub mod server {
 }
 
 use client::{CallClient, CastClient, ClientServiceHandle};
-use codec::{DefaultDecoderMaker, IntoEncoderMaker, MakeDecoder, MakeEncoder};
 
 mod client_service;
 mod client_side_channel;
@@ -131,66 +130,58 @@ pub trait Call: Sized + Send + Sync + 'static {
     type Req;
 
     /// Request message encoder.
-    type ReqEncoder: codec::Encode<Message = Self::Req> + Send + 'static;
+    type ReqEncoder: bytecodec::Encode<Item = Self::Req> + Send + 'static;
 
     /// Request message decoder.
-    type ReqDecoder: codec::Decode<Message = Self::Req> + Send + 'static;
+    type ReqDecoder: bytecodec::Decode<Item = Self::Req> + Send + 'static;
 
     /// Response message.
     type Res: Send + 'static;
 
     /// Response message encoder.
-    type ResEncoder: codec::Encode<Message = Self::Res> + Send + 'static;
+    type ResEncoder: bytecodec::Encode<Item = Self::Res> + Send + 'static;
 
     /// Response message decoder.
-    type ResDecoder: codec::Decode<Message = Self::Res> + Send + 'static;
+    type ResDecoder: bytecodec::Decode<Item = Self::Res> + Send + 'static;
 
     /// Makes a new RPC client.
-    fn client(
-        service: &ClientServiceHandle,
-    ) -> CallClient<Self, DefaultDecoderMaker<Self::ResDecoder>, IntoEncoderMaker<Self::ReqEncoder>>
+    fn client(service: &ClientServiceHandle) -> CallClient<Self>
     where
-        Self::ReqEncoder: From<Self::Req>,
+        Self::ReqEncoder: Default,
         Self::ResDecoder: Default,
     {
-        Self::client_with_codec(service, DefaultDecoderMaker::new(), IntoEncoderMaker::new())
+        Self::client_with_codec(service, Default::default(), Default::default())
     }
 
     /// Makes a new RPC client with the given decoder maker.
-    fn client_with_decoder<D>(
+    fn client_with_decoder(
         service: &ClientServiceHandle,
-        decoder_maker: D,
-    ) -> CallClient<Self, D, IntoEncoderMaker<Self::ReqEncoder>>
+        decoder: Self::ResDecoder,
+    ) -> CallClient<Self>
     where
-        Self::ReqEncoder: From<Self::Req>,
-        D: MakeDecoder<Self::ResDecoder>,
+        Self::ReqEncoder: Default,
     {
-        Self::client_with_codec(service, decoder_maker, IntoEncoderMaker::new())
+        Self::client_with_codec(service, decoder, Default::default())
     }
 
     /// Makes a new RPC client with the given encoder maker.
-    fn client_with_encoder<E>(
+    fn client_with_encoder(
         service: &ClientServiceHandle,
-        encoder_maker: E,
-    ) -> CallClient<Self, DefaultDecoderMaker<Self::ResDecoder>, E>
+        encoder: Self::ReqEncoder,
+    ) -> CallClient<Self>
     where
         Self::ResDecoder: Default,
-        E: MakeEncoder<Self::ReqEncoder>,
     {
-        Self::client_with_codec(service, DefaultDecoderMaker::new(), encoder_maker)
+        Self::client_with_codec(service, Default::default(), encoder)
     }
 
     /// Makes a new RPC client with the given decoder and encoder makers.
-    fn client_with_codec<D, E>(
+    fn client_with_codec(
         service: &ClientServiceHandle,
-        decoder_maker: D,
-        encoder_maker: E,
-    ) -> CallClient<Self, D, E>
-    where
-        D: MakeDecoder<Self::ResDecoder>,
-        E: MakeEncoder<Self::ReqEncoder>,
-    {
-        CallClient::new(service, decoder_maker, encoder_maker)
+        decoder: Self::ResDecoder,
+        encoder: Self::ReqEncoder,
+    ) -> CallClient<Self> {
+        CallClient::new(service, decoder, encoder)
     }
 }
 
@@ -208,28 +199,25 @@ pub trait Cast: Sized + Sync + Send + 'static {
     type Notification;
 
     /// Notification message encoder.
-    type Encoder: codec::Encode<Message = Self::Notification> + Send + 'static;
+    type Encoder: bytecodec::Encode<Item = Self::Notification> + Send + 'static;
 
     /// Notification message decoder.
-    type Decoder: codec::Decode<Message = Self::Notification> + Send + 'static;
+    type Decoder: bytecodec::Decode<Item = Self::Notification> + Send + 'static;
 
     /// Makes a new RPC client.
-    fn client(service: &ClientServiceHandle) -> CastClient<Self, IntoEncoderMaker<Self::Encoder>>
+    fn client(service: &ClientServiceHandle) -> CastClient<Self>
     where
-        Self::Encoder: From<Self::Notification>,
+        Self::Encoder: Default,
     {
-        Self::client_with_encoder(service, IntoEncoderMaker::new())
+        Self::client_with_encoder(service, Default::default())
     }
 
     /// Makes a new RPC client with the given encoder maker.
-    fn client_with_encoder<E>(
+    fn client_with_encoder(
         service: &ClientServiceHandle,
-        encoder_maker: E,
-    ) -> CastClient<Self, E>
-    where
-        E: MakeEncoder<Self::Encoder>,
-    {
-        CastClient::new(service, encoder_maker)
+        encoder: Self::Encoder,
+    ) -> CastClient<Self> {
+        CastClient::new(service, encoder)
     }
 }
 

@@ -2,12 +2,13 @@ use std::collections::HashMap;
 use std::fmt;
 use std::marker::PhantomData;
 use std::sync::Arc;
+use bytecodec::{Decode, DecodeBuf, Encode};
 use byteorder::{BigEndian, ByteOrder};
+use factory::Factory;
 use futures::{Async, Future, Poll};
 use futures::future::Either;
 
 use {Call, Cast, Error, ErrorKind, ProcedureId, Result};
-use codec::{Decode, MakeDecoder, MakeEncoder};
 use frame::{Frame, HandleFrame};
 use message::{MessageId, OutgoingMessage};
 use metrics::HandlerMetrics;
@@ -231,6 +232,7 @@ pub trait MessageHandlerFactory: Send + Sync + 'static {
     fn create_message_handler(&self, message_id: MessageId) -> Box<HandleMessage>;
 }
 
+// TODO:
 pub trait HandleMessage: Send + 'static {
     fn handle_message(&mut self, data: &[u8], eos: bool) -> Result<()>;
     fn finish(&mut self, priority: u8) -> Result<Action>;
@@ -246,7 +248,7 @@ impl<T, H, D> CastHandlerFactory<T, H, D>
 where
     T: Cast,
     H: HandleCast<T>,
-    D: MakeDecoder<T::Decoder>,
+    D: Factory<Item = T::Decoder>,
 {
     pub fn new(handler: H, decoder_maker: D, metrics: HandlerMetrics) -> Self {
         CastHandlerFactory {
@@ -260,38 +262,45 @@ where
 impl<T, H, D> MessageHandlerFactory for CastHandlerFactory<T, H, D>
 where
     T: Cast,
+    T::Notification: Send, // TODO: delete
     H: HandleCast<T>,
-    D: MakeDecoder<T::Decoder>,
+    D: Factory<Item = T::Decoder> + Send + Sync + 'static,
 {
     fn create_message_handler(&self, _message_id: MessageId) -> Box<HandleMessage> {
-        let decoder = self.decoder_maker.make_decoder();
+        let decoder = self.decoder_maker.create();
         let handler = CastHandler {
             _rpc: PhantomData,
             handler: Arc::clone(&self.handler),
-            decoder: Some(decoder),
+            decoder,
+            notification: None,
         };
         self.metrics.rpc_count.increment();
         Box::new(handler)
     }
 }
 
-struct CastHandler<T, H, D> {
+struct CastHandler<T: Cast, H, D> {
     _rpc: PhantomData<T>,
     handler: Arc<H>,
-    decoder: Option<D>,
+    decoder: D,
+    notification: Option<T::Notification>,
 }
 impl<T, H> HandleMessage for CastHandler<T, H, T::Decoder>
 where
     T: Cast,
+    T::Notification: Send, // TODO: delete
     H: HandleCast<T>,
 {
     fn handle_message(&mut self, data: &[u8], eos: bool) -> Result<()> {
-        let decoder = track_assert_some!(self.decoder.as_mut(), ErrorKind::Other);
-        track!(decoder.decode(data, eos))
+        let mut buf = DecodeBuf::with_eos(data, eos);
+        if let Some(notification) = track!(self.decoder.decode(&mut buf))? {
+            // TODO: validate eos
+            self.notification = Some(notification);
+        }
+        Ok(())
     }
     fn finish(&mut self, _priority: u8) -> Result<Action> {
-        let decoder = track_assert_some!(self.decoder.take(), ErrorKind::Other);
-        let notification = track!(decoder.finish())?;
+        let notification = track_assert_some!(self.notification.take(), ErrorKind::Other);
         let noreply = self.handler.handle_cast(notification);
         Ok(Action::NoReply(noreply))
     }
@@ -308,8 +317,8 @@ impl<T, H, D, E> CallHandlerFactory<T, H, D, E>
 where
     T: Call,
     H: HandleCall<T>,
-    D: MakeDecoder<T::ReqDecoder>,
-    E: MakeEncoder<T::ResEncoder>,
+    D: Factory<Item = T::ReqDecoder>,
+    E: Factory<Item = T::ResEncoder>,
 {
     pub fn new(handler: H, decoder_maker: D, encoder_maker: E, metrics: HandlerMetrics) -> Self {
         CallHandlerFactory {
@@ -324,49 +333,58 @@ where
 impl<T, H, D, E> MessageHandlerFactory for CallHandlerFactory<T, H, D, E>
 where
     T: Call,
+    T::Req: Send, // TODO: delete
     H: HandleCall<T>,
-    D: MakeDecoder<T::ReqDecoder>,
-    E: MakeEncoder<T::ResEncoder>,
+    D: Factory<Item = T::ReqDecoder> + Send + Sync + 'static,
+    E: Factory<Item = T::ResEncoder> + Send + Sync + 'static,
 {
     fn create_message_handler(&self, message_id: MessageId) -> Box<HandleMessage> {
-        let decoder = self.decoder_maker.make_decoder();
+        let decoder = self.decoder_maker.create();
         let handler = CallHandler {
             _rpc: PhantomData,
             handler: Arc::clone(&self.handler),
-            decoder: Some(decoder),
+            decoder,
             encoder_maker: Arc::clone(&self.encoder_maker),
             message_id,
+            request: None,
         };
         self.metrics.rpc_count.increment();
         Box::new(handler)
     }
 }
 
-struct CallHandler<T, H, D, E> {
+struct CallHandler<T: Call, H, D, E> {
     _rpc: PhantomData<T>,
     handler: Arc<H>,
-    decoder: Option<D>,
-    encoder_maker: Arc<E>,
+    decoder: D,
+    encoder_maker: Arc<E>, // TODO: s/encoder_maker/encoder/
     message_id: MessageId,
+    request: Option<T::Req>,
 }
 impl<T, H, E> HandleMessage for CallHandler<T, H, T::ReqDecoder, E>
 where
     T: Call,
+    T::Req: Send, // TODO: delete
     H: HandleCall<T>,
-    E: MakeEncoder<T::ResEncoder>,
+    E: Factory<Item = T::ResEncoder> + Send + Sync + 'static,
 {
     fn handle_message(&mut self, data: &[u8], eos: bool) -> Result<()> {
-        let decoder = track_assert_some!(self.decoder.as_mut(), ErrorKind::Other);
-        track!(decoder.decode(data, eos))
+        let mut buf = DecodeBuf::with_eos(data, eos);
+        if let Some(request) = track!(self.decoder.decode(&mut buf))? {
+            // TODO: validate eos
+            self.request = Some(request);
+        }
+        Ok(())
     }
     fn finish(&mut self, priority: u8) -> Result<Action> {
-        let decoder = track_assert_some!(self.decoder.take(), ErrorKind::Other);
-        let request = track!(decoder.finish())?;
+        let request = track_assert_some!(self.request.take(), ErrorKind::Other);
         let encoder_maker = Arc::clone(&self.encoder_maker);
         let reply = self.handler
             .handle_call(request)
             .boxed(self.message_id, move |v| {
-                OutgoingMessage::new(None, priority, encoder_maker.make_encoder(v))
+                let mut encoder = encoder_maker.create();
+                encoder.start_encoding(v).expect("TODO");
+                OutgoingMessage::new(None, priority, encoder)
             });
         Ok(Action::Reply(reply))
     }

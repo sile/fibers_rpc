@@ -2,13 +2,13 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
+use bytecodec::{Decode, DecodeBuf};
 use fibers::sync::oneshot;
 use fibers::time::timer::{self, Timeout};
 use futures::{Async, Future, Poll};
 use trackable::error::ErrorKindExt;
 
 use {Error, ErrorKind, Result};
-use codec::Decode;
 use frame::{Frame, HandleFrame};
 use message::MessageId;
 use metrics::ClientMetrics;
@@ -107,8 +107,8 @@ pub type BoxResponseHandler = Box<HandleFrame<Item = ()> + Send + 'static>;
 
 #[derive(Debug)]
 pub struct ResponseHandler<D: Decode> {
-    decoder: Option<D>,
-    reply_tx: Option<oneshot::Monitored<D::Message, Error>>,
+    decoder: D,
+    reply_tx: Option<oneshot::Monitored<D::Item, Error>>,
     metrics: Arc<ClientMetrics>,
 }
 impl<D: Decode> ResponseHandler<D> {
@@ -116,10 +116,10 @@ impl<D: Decode> ResponseHandler<D> {
         decoder: D,
         timeout: Option<Duration>,
         metrics: Arc<ClientMetrics>,
-    ) -> (Self, Response<D::Message>) {
+    ) -> (Self, Response<D::Item>) {
         let (reply_tx, reply_rx) = oneshot::monitor();
         let handler = ResponseHandler {
-            decoder: Some(decoder),
+            decoder: decoder,
             reply_tx: Some(reply_tx),
             metrics,
         };
@@ -132,13 +132,9 @@ impl<D: Decode> ResponseHandler<D> {
 impl<D: Decode> HandleFrame for ResponseHandler<D> {
     type Item = ();
     fn handle_frame(&mut self, frame: &Frame) -> Result<Option<Self::Item>> {
-        {
-            let decoder = track_assert_some!(self.decoder.as_mut(), ErrorKind::Other);
-            track!(decoder.decode(frame.data(), frame.is_end_of_message()))?;
-        }
-        if frame.is_end_of_message() {
-            let decoder = track_assert_some!(self.decoder.take(), ErrorKind::Other);
-            let response = track!(decoder.finish())?;
+        let mut buf = DecodeBuf::with_eos(frame.data(), frame.is_end_of_message());
+        if let Some(response) = track!(self.decoder.decode(&mut buf))? {
+            // TODO: validate eos
             let reply_tx = self.reply_tx.take().expect("Never fails");
             reply_tx.exit(Ok(response));
             self.metrics.ok_responses.increment();

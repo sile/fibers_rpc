@@ -2,32 +2,31 @@ use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
+use bytecodec::Encode;
 use trackable::error::ErrorKindExt;
 
 use {Call, Cast, ErrorKind};
 use client_service::{ClientServiceHandle, Message};
 use client_side_handlers::{Response, ResponseHandler};
-use codec::{MakeDecoder, MakeEncoder};
 use message::OutgoingMessage;
 use metrics::ClientMetrics;
 
 /// Client for notification RPC.
 #[derive(Debug)]
-pub struct CastClient<'a, T, E> {
+pub struct CastClient<'a, T: Cast> {
     service: &'a ClientServiceHandle,
-    encoder_maker: E,
+    encoder: T::Encoder,
     options: Options,
     _cast: PhantomData<T>,
 }
-impl<'a, T, E> CastClient<'a, T, E>
+impl<'a, T> CastClient<'a, T>
 where
     T: Cast,
-    E: MakeEncoder<T::Encoder>,
 {
-    pub(crate) fn new(service: &'a ClientServiceHandle, encoder_maker: E) -> Self {
+    pub(crate) fn new(service: &'a ClientServiceHandle, encoder: T::Encoder) -> Self {
         CastClient {
             service,
-            encoder_maker,
+            encoder,
             options: Options::default(),
             _cast: PhantomData,
         }
@@ -36,7 +35,7 @@ where
     /// Sends the notification message to the RPC server.
     ///
     /// If the message is discarded before sending, this method will return `false`.
-    pub fn cast(&self, server: SocketAddr, notification: T::Notification) -> bool {
+    pub fn cast(mut self, server: SocketAddr, notification: T::Notification) -> bool {
         if !self.options
             .is_allowable_queue_len(&self.service.metrics, server)
         {
@@ -44,9 +43,9 @@ where
             return false;
         }
 
-        let encoder = self.encoder_maker.make_encoder(notification);
+        self.encoder.start_encoding(notification).expect("TODO");
         let message = Message {
-            message: OutgoingMessage::new(Some(T::ID), self.options.priority, encoder),
+            message: OutgoingMessage::new(Some(T::ID), self.options.priority, self.encoder),
             response_handler: None,
             force_wakeup: self.options.force_wakeup,
         };
@@ -59,7 +58,7 @@ where
         true
     }
 }
-impl<'a, T, E> CastClient<'a, T, E> {
+impl<'a, T: Cast> CastClient<'a, T> {
     /// Returns a reference to the RPC options of this client.
     pub fn options(&self) -> &Options {
         &self.options
@@ -70,41 +69,36 @@ impl<'a, T, E> CastClient<'a, T, E> {
         &mut self.options
     }
 
-    /// Returns a reference to the encoder maker of this client.
-    pub fn encoder_maker(&self) -> &E {
-        &self.encoder_maker
+    /// Returns a reference to the encoder of this client.
+    pub fn encoder(&self) -> &T::Encoder {
+        &self.encoder
     }
 
-    /// Returns a mutable reference to the encoder maker of this client.
-    pub fn encoder_maker_mut(&mut self) -> &mut E {
-        &mut self.encoder_maker
+    /// Returns a mutable reference to the encoder of this client.
+    pub fn encoder_mu(&mut self) -> &mut T::Encoder {
+        &mut self.encoder
     }
 }
 
 /// Client for request/response RPC.
 #[derive(Debug)]
-pub struct CallClient<'a, T, D, E> {
+pub struct CallClient<'a, T: Call> {
     service: &'a ClientServiceHandle,
-    decoder_maker: D,
-    encoder_maker: E,
+    decoder: T::ResDecoder,
+    encoder: T::ReqEncoder,
     options: Options,
     _call: PhantomData<T>,
 }
-impl<'a, T, D, E> CallClient<'a, T, D, E>
-where
-    T: Call,
-    D: MakeDecoder<T::ResDecoder>,
-    E: MakeEncoder<T::ReqEncoder>,
-{
+impl<'a, T: Call> CallClient<'a, T> {
     pub(crate) fn new(
         service: &'a ClientServiceHandle,
-        decoder_maker: D,
-        encoder_maker: E,
+        decoder: T::ResDecoder,
+        encoder: T::ReqEncoder,
     ) -> Self {
         CallClient {
             service,
-            decoder_maker,
-            encoder_maker,
+            decoder,
+            encoder,
             options: Options::default(),
             _call: PhantomData,
         }
@@ -112,7 +106,7 @@ where
 
     /// Sends the request message to the RPC server,
     /// and returns a future that represents the response from the server.
-    pub fn call(&self, server: SocketAddr, request: T::Req) -> Response<T::Res> {
+    pub fn call(mut self, server: SocketAddr, request: T::Req) -> Response<T::Res> {
         if !self.options
             .is_allowable_queue_len(&self.service.metrics, server)
         {
@@ -121,16 +115,15 @@ where
             return Response::error(e.into());
         }
 
-        let encoder = self.encoder_maker.make_encoder(request);
-        let decoder = self.decoder_maker.make_decoder();
         let (handler, response) = ResponseHandler::new(
-            decoder,
+            self.decoder,
             self.options.timeout,
             Arc::clone(&self.service.metrics),
         );
 
+        self.encoder.start_encoding(request).expect("TODO");
         let message = Message {
-            message: OutgoingMessage::new(Some(T::ID), self.options.priority, encoder),
+            message: OutgoingMessage::new(Some(T::ID), self.options.priority, self.encoder),
             response_handler: Some(Box::new(handler)),
             force_wakeup: self.options.force_wakeup,
         };
@@ -144,7 +137,7 @@ where
         response
     }
 }
-impl<'a, T, D, E> CallClient<'a, T, D, E> {
+impl<'a, T: Call> CallClient<'a, T> {
     /// Returns a reference to the RPC options of this client.
     pub fn options(&self) -> &Options {
         &self.options
@@ -155,24 +148,24 @@ impl<'a, T, D, E> CallClient<'a, T, D, E> {
         &mut self.options
     }
 
-    /// Returns a reference to the decoder maker of this client.
-    pub fn decoder_maker(&self) -> &D {
-        &self.decoder_maker
+    /// Returns a reference to the decoder of this client.
+    pub fn decoder(&self) -> &T::ResDecoder {
+        &self.decoder
     }
 
-    /// Returns a mutable reference to the decoder maker of this client.
-    pub fn decoder_maker_mut(&mut self) -> &mut D {
-        &mut self.decoder_maker
+    /// Returns a mutable reference to the decoder of this client.
+    pub fn decoder_mut(&mut self) -> &mut T::ResDecoder {
+        &mut self.decoder
     }
 
-    /// Returns a reference to the encoder maker of this client.
-    pub fn encoder_maker(&self) -> &E {
-        &self.encoder_maker
+    /// Returns a reference to the encoder of this client.
+    pub fn encoder(&self) -> &T::ReqEncoder {
+        &self.encoder
     }
 
-    /// Returns a mutable reference to the encoder maker of this client.
-    pub fn encoder_maker_mut(&mut self) -> &mut E {
-        &mut self.encoder_maker
+    /// Returns a mutable reference to the encoder of this client.
+    pub fn encoder_mut(&mut self) -> &mut T::ReqEncoder {
+        &mut self.encoder
     }
 }
 
