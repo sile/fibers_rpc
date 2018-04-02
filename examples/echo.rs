@@ -1,3 +1,4 @@
+extern crate bytecodec;
 extern crate clap;
 extern crate fibers;
 extern crate fibers_rpc;
@@ -10,11 +11,11 @@ extern crate trackable;
 use std::io::{self, Read, Write};
 use std::net::ToSocketAddrs;
 use std::time::{Duration, Instant};
+use bytecodec::bytes::{BytesEncoder, RemainingBytesDecoder};
 use clap::{App, Arg, SubCommand};
 use fibers::{Executor, Spawn, ThreadPoolExecutor};
 use fibers_rpc::{Call, ProcedureId};
 use fibers_rpc::client::{ClientServiceBuilder, ClientServiceHandle, Options as RpcOptions};
-use fibers_rpc::codec::BytesEncoder;
 use fibers_rpc::server::{HandleCall, Reply, ServerBuilder};
 use futures::{Async, Future, Poll};
 use sloggers::Build;
@@ -29,11 +30,11 @@ impl Call for EchoRpc {
 
     type Req = Vec<u8>;
     type ReqEncoder = BytesEncoder<Vec<u8>>;
-    type ReqDecoder = Vec<u8>;
+    type ReqDecoder = RemainingBytesDecoder;
 
     type Res = Vec<u8>;
     type ResEncoder = BytesEncoder<Vec<u8>>;
-    type ResDecoder = Vec<u8>;
+    type ResDecoder = RemainingBytesDecoder;
 }
 
 struct EchoHandler;

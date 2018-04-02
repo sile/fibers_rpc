@@ -8,14 +8,15 @@
 //! Simple echo RPC server:
 //!
 //! ```
+//! # extern crate bytecodec;
 //! # extern crate fibers;
 //! # extern crate fibers_rpc;
 //! # extern crate futures;
 //! # fn main() {
+//! use bytecodec::bytes::{BytesEncoder, RemainingBytesDecoder};
 //! use fibers::{Executor, InPlaceExecutor, Spawn};
 //! use fibers_rpc::{Call, ProcedureId};
 //! use fibers_rpc::client::ClientServiceBuilder;
-//! use fibers_rpc::codec::BytesEncoder;
 //! use fibers_rpc::server::{HandleCall, Reply, ServerBuilder};
 //! use futures::Future;
 //!
@@ -27,11 +28,11 @@
 //!
 //!     type Req = Vec<u8>;
 //!     type ReqEncoder = BytesEncoder<Vec<u8>>;
-//!     type ReqDecoder = Vec<u8>;
+//!     type ReqDecoder = RemainingBytesDecoder;
 //!
 //!     type Res = Vec<u8>;
 //!     type ResEncoder = BytesEncoder<Vec<u8>>;
-//!     type ResDecoder = Vec<u8>;
+//!     type ResDecoder = RemainingBytesDecoder;
 //! }
 //!
 //! // Executor
@@ -223,12 +224,12 @@ pub trait Cast: Sized + Sync + Send + 'static {
 
 #[cfg(test)]
 mod test {
+    use bytecodec::bytes::{BytesEncoder, RemainingBytesDecoder};
     use fibers::{Executor, InPlaceExecutor, Spawn};
     use futures::Future;
 
     use {Call, ProcedureId};
     use client::ClientServiceBuilder;
-    use codec::BytesEncoder;
     use server::{HandleCall, Reply, ServerBuilder};
 
     // RPC
@@ -239,11 +240,11 @@ mod test {
 
         type Req = Vec<u8>;
         type ReqEncoder = BytesEncoder<Vec<u8>>;
-        type ReqDecoder = Vec<u8>;
+        type ReqDecoder = RemainingBytesDecoder;
 
         type Res = Vec<u8>;
         type ResEncoder = BytesEncoder<Vec<u8>>;
-        type ResDecoder = Vec<u8>;
+        type ResDecoder = RemainingBytesDecoder;
     }
 
     // Handler
