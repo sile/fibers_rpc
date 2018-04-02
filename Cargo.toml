@@ -15,26 +15,15 @@ codecov = {repository = "sile/fibers_rpc"}
 
 [dependencies]
 atomic_immut = "0.1"
-bincode = { version = "1", optional = true }
+bytecodec = "0.1"
 byteorder = "1"
+factory = "0.1"
 fibers = "0.1"
 futures = "0.1"
 prometrics = "0.1"
-rmp-serde = { version = "0.13", optional = true }
-serde = { version = "1", optional = true }
-serde_derive = { version = "1", optional = true }
-serde_json = { version = "1", optional = true }
 slog = "2"
 trackable = "0.2"
 
 [dev-dependencies]
 clap = "2"
 sloggers = "0.2"
-
-[features]
-bincode_codec = ["serde", "bincode"]
-json_codec = ["serde", "serde_json"]
-msgpack_codec = ["serde", "rmp-serde"]
-
-[package.metadata.docs.rs]
-all-features = true

@@ -3,15 +3,6 @@ use std::cmp;
 use std::io::{self, Cursor, Read, Write};
 use std::marker::PhantomData;
 
-#[cfg(feature = "bincode_codec")]
-pub use codec_bincode::{BincodeDecoder, BincodeEncoder};
-
-#[cfg(feature = "json_codec")]
-pub use codec_json::{JsonDecoder, JsonEncoder};
-
-#[cfg(feature = "msgpack_codec")]
-pub use codec_msgpack::{MsgPackDecoder, MsgPackEncoder};
-
 use {Error, ErrorKind, Result};
 
 /// This trait allows for incrementally decoding an RPC message from a sequence of bytes.

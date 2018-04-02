@@ -63,18 +63,12 @@
 //! ```
 #![warn(missing_docs)]
 extern crate atomic_immut;
-#[cfg(feature = "bincode_codec")]
-extern crate bincode;
+extern crate bytecodec;
 extern crate byteorder;
+extern crate factory;
 extern crate fibers;
 extern crate futures;
 extern crate prometrics;
-#[cfg(feature = "msgpack_codec")]
-extern crate rmp_serde;
-#[cfg(any(feature = "bincode_codec", feature = "json_codec", feature = "msgpack_codec"))]
-extern crate serde;
-#[cfg(feature = "json_codec")]
-extern crate serde_json;
 #[macro_use]
 extern crate slog;
 #[macro_use]
@@ -104,12 +98,6 @@ use codec::{DefaultDecoderMaker, IntoEncoderMaker, MakeDecoder, MakeEncoder};
 mod client_service;
 mod client_side_channel;
 mod client_side_handlers;
-#[cfg(feature = "bincode_codec")]
-mod codec_bincode;
-#[cfg(feature = "json_codec")]
-mod codec_json;
-#[cfg(feature = "msgpack_codec")]
-mod codec_msgpack;
 mod error;
 mod frame;
 mod frame_stream;
