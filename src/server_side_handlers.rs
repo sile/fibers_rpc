@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::marker::PhantomData;
 use std::sync::Arc;
-use bytecodec::{Decode, DecodeBuf, Encode};
+use bytecodec::{Decode, Encode, Eos};
 use byteorder::{BigEndian, ByteOrder};
 use factory::Factory;
 use futures::{Async, Future, Poll};
@@ -292,9 +292,10 @@ where
     H: HandleCast<T>,
 {
     fn handle_message(&mut self, data: &[u8], eos: bool) -> Result<()> {
-        let mut buf = DecodeBuf::with_eos(data, eos);
-        if let Some(notification) = track!(self.decoder.decode(&mut buf))? {
-            // TODO: validate eos
+        let eos = Eos::new(eos);
+        let (_size, item) = track!(self.decoder.decode(data, eos))?;
+        if let Some(notification) = item {
+            // TODO: validate eos and _size
             self.notification = Some(notification);
         }
         Ok(())
@@ -369,9 +370,10 @@ where
     E: Factory<Item = T::ResEncoder> + Send + Sync + 'static,
 {
     fn handle_message(&mut self, data: &[u8], eos: bool) -> Result<()> {
-        let mut buf = DecodeBuf::with_eos(data, eos);
-        if let Some(request) = track!(self.decoder.decode(&mut buf))? {
-            // TODO: validate eos
+        let eos = Eos::new(eos);
+        let (_size, item) = track!(self.decoder.decode(data, eos))?;
+        if let Some(request) = item {
+            // TODO: validate eos and _size
             self.request = Some(request);
         }
         Ok(())

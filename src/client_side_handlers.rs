@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
-use bytecodec::{Decode, DecodeBuf};
+use bytecodec::{Decode, Eos};
 use fibers::sync::oneshot;
 use fibers::time::timer::{self, Timeout};
 use futures::{Async, Future, Poll};
@@ -132,9 +132,10 @@ impl<D: Decode> ResponseHandler<D> {
 impl<D: Decode> HandleFrame for ResponseHandler<D> {
     type Item = ();
     fn handle_frame(&mut self, frame: &Frame) -> Result<Option<Self::Item>> {
-        let mut buf = DecodeBuf::with_eos(frame.data(), frame.is_end_of_message());
-        if let Some(response) = track!(self.decoder.decode(&mut buf))? {
-            // TODO: validate eos
+        let eos = Eos::new(frame.is_end_of_message());
+        let (_size, item) = track!(self.decoder.decode(frame.data(), eos))?;
+        if let Some(response) = item {
+            // TODO: validate `_size`
             let reply_tx = self.reply_tx.take().expect("Never fails");
             reply_tx.exit(Ok(response));
             self.metrics.ok_responses.increment();

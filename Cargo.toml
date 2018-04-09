@@ -15,7 +15,7 @@ codecov = {repository = "sile/fibers_rpc"}
 
 [dependencies]
 atomic_immut = "0.1"
-bytecodec = "0.1"
+bytecodec = "0.2"
 byteorder = "1"
 factory = "0.1"
 fibers = "0.1"
