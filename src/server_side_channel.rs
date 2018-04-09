@@ -4,27 +4,24 @@ use futures::{Async, Poll, Stream};
 use slog::Logger;
 
 use Error;
-use frame::HandleFrame;
-use frame_stream::FrameStream;
 use message::{MessageId, OutgoingMessage};
 use message_stream::{MessageStream, MessageStreamEvent};
 use metrics::ChannelMetrics;
-use server_side_handlers::{Action, IncomingFrameHandler};
+use server_side_handlers::{Action, Assigner};
 
 #[derive(Debug)]
 pub struct ServerSideChannel {
     logger: Logger,
-    message_stream: MessageStream<IncomingFrameHandler>,
+    message_stream: MessageStream<Assigner>,
 }
 impl ServerSideChannel {
     pub fn new(
         logger: Logger,
         transport_stream: TcpStream,
-        handler: IncomingFrameHandler,
+        assigner: Assigner,
         metrics: ChannelMetrics,
     ) -> Self {
-        let message_stream =
-            MessageStream::new(FrameStream::new(transport_stream), handler, metrics);
+        let message_stream = MessageStream::new(transport_stream, assigner, metrics);
         ServerSideChannel {
             logger,
             message_stream,
@@ -61,9 +58,10 @@ impl Stream for ServerSideChannel {
                                 "Failed to receive message({:?}): {}", message_id, e
                             );
                             self.message_stream.send_error_frame(message_id);
-                            self.message_stream
-                                .incoming_frame_handler_mut()
-                                .handle_error(message_id, e);
+                            // TODO
+                            // self.message_stream
+                            //     .incoming_frame_handler_mut()
+                            //     .handle_error(message_id, e);
                         }
                         Ok(action) => {
                             debug!(

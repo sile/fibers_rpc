@@ -1,34 +1,30 @@
 use std::cmp;
 use std::collections::{BinaryHeap, HashSet, VecDeque};
+use bytecodec::Decode;
+use fibers::net::TcpStream;
 use futures::{Async, Future, Poll, Stream};
 use trackable::error::ErrorKindExt;
 
 use {Error, ErrorKind, Result};
-use frame::HandleFrame;
-use frame_stream::FrameStream;
-use message::{MessageId, OutgoingMessage};
+use message::{AssignIncomingMessageHandler, MessageId, OutgoingMessage};
 use metrics::ChannelMetrics;
 
-#[derive(Debug)]
-pub struct MessageStream<H: HandleFrame> {
-    frame_stream: FrameStream,
+// TODO: #[derive(Debug)]
+pub struct MessageStream<A: AssignIncomingMessageHandler> {
+    transport_stream: TcpStream,
     outgoing_messages: BinaryHeap<SendingMessage>,
-    incoming_frame_handler: H,
+    assigner: A,
     cancelled_incoming_messages: HashSet<MessageId>,
-    event_queue: VecDeque<MessageStreamEvent<H::Item>>,
+    event_queue: VecDeque<MessageStreamEvent<<A::Handler as Decode>::Item>>,
     seqno: u64,
     metrics: ChannelMetrics,
 }
-impl<H: HandleFrame> MessageStream<H> {
-    pub fn new(
-        frame_stream: FrameStream,
-        incoming_frame_handler: H,
-        metrics: ChannelMetrics,
-    ) -> Self {
+impl<A: AssignIncomingMessageHandler> MessageStream<A> {
+    pub fn new(transport_stream: TcpStream, assigner: A, metrics: ChannelMetrics) -> Self {
         MessageStream {
-            frame_stream,
+            transport_stream,
             outgoing_messages: BinaryHeap::new(),
-            incoming_frame_handler,
+            assigner,
             cancelled_incoming_messages: HashSet::new(),
             event_queue: VecDeque::new(),
             seqno: 0,
@@ -64,135 +60,141 @@ impl<H: HandleFrame> MessageStream<H> {
         self.metrics.enqueued_outgoing_messages.increment();
     }
 
-    pub fn incoming_frame_handler_mut(&mut self) -> &mut H {
-        &mut self.incoming_frame_handler
+    pub fn assigner_mut(&mut self) -> &mut A {
+        &mut self.assigner
     }
 
     fn handle_outgoing_messages(&mut self) -> bool {
-        let mut did_something = false;
-        while let Some(mut sending) = self.outgoing_messages.pop() {
-            let result = self.frame_stream.send_frame(
-                sending.message_id,
-                sending.message.priority(),
-                |frame| track!(sending.message.encode(frame.data())),
-            );
-            match result {
-                Err(e) => {
-                    if !sending.is_error {
-                        let event = MessageStreamEvent::Sent {
-                            message_id: sending.message_id,
-                            result: Err(e),
-                        };
-                        self.event_queue.push_back(event);
-                        self.metrics.encode_frame_failures.increment();
-                    }
-                    self.metrics.dequeued_outgoing_messages.increment();
-                    did_something = true;
-                }
-                Ok(None) => {
-                    // The sending buffer is full
-                    self.outgoing_messages.push(sending);
-                    break;
-                }
-                Ok(Some(false)) => {
-                    // A part of the message was written to the sending buffer
-                    sending.seqno = self.seqno;
-                    self.seqno += 1;
-                    self.outgoing_messages.push(sending);
-                    did_something = true;
-                }
-                Ok(Some(true)) => {
-                    // Completed to write the message to the sending buffer
-                    let event = MessageStreamEvent::Sent {
-                        message_id: sending.message_id,
-                        result: Ok(()),
-                    };
-                    self.event_queue.push_back(event);
-                    self.metrics.dequeued_outgoing_messages.increment();
-                    did_something = true;
-                }
-            }
-        }
-        did_something
+        // let mut did_something = false;
+        // while let Some(mut sending) = self.outgoing_messages.pop() {
+        //     let result = self.frame_stream.send_frame(
+        //         sending.message_id,
+        //         sending.message.priority(),
+        //         |frame| track!(sending.message.encode(frame.data())),
+        //     );
+        //     match result {
+        //         Err(e) => {
+        //             if !sending.is_error {
+        //                 let event = MessageStreamEvent::Sent {
+        //                     message_id: sending.message_id,
+        //                     result: Err(e),
+        //                 };
+        //                 self.event_queue.push_back(event);
+        //                 self.metrics.encode_frame_failures.increment();
+        //             }
+        //             self.metrics.dequeued_outgoing_messages.increment();
+        //             did_something = true;
+        //         }
+        //         Ok(None) => {
+        //             // The sending buffer is full
+        //             self.outgoing_messages.push(sending);
+        //             break;
+        //         }
+        //         Ok(Some(false)) => {
+        //             // A part of the message was written to the sending buffer
+        //             sending.seqno = self.seqno;
+        //             self.seqno += 1;
+        //             self.outgoing_messages.push(sending);
+        //             did_something = true;
+        //         }
+        //         Ok(Some(true)) => {
+        //             // Completed to write the message to the sending buffer
+        //             let event = MessageStreamEvent::Sent {
+        //                 message_id: sending.message_id,
+        //                 result: Ok(()),
+        //             };
+        //             self.event_queue.push_back(event);
+        //             self.metrics.dequeued_outgoing_messages.increment();
+        //             did_something = true;
+        //         }
+        //     }
+        // }
+        // did_something
+        // TODO:
+        unimplemented!()
     }
 
     fn handle_incoming_frames(&mut self) -> bool {
-        let mut did_something = false;
-        while let Some(frame) = self.frame_stream.recv_frame() {
-            did_something = true;
+        // let mut did_something = false;
+        // while let Some(frame) = self.frame_stream.recv_frame() {
+        //     did_something = true;
 
-            let message_id = frame.message_id();
-            if self.cancelled_incoming_messages.contains(&message_id) {
-                if frame.is_end_of_message() {
-                    self.cancelled_incoming_messages.remove(&message_id);
-                }
-                continue;
-            }
+        //     let message_id = frame.message_id();
+        //     if self.cancelled_incoming_messages.contains(&message_id) {
+        //         if frame.is_end_of_message() {
+        //             self.cancelled_incoming_messages.remove(&message_id);
+        //         }
+        //         continue;
+        //     }
 
-            let result = if frame.is_error() {
-                Err(track!(ErrorKind::InvalidInput.error()).into())
-            } else {
-                track!(
-                    self.incoming_frame_handler.handle_frame(&frame),
-                    "frame.data.len={}",
-                    frame.data().len()
-                )
-            };
-            match result {
-                Err(e) => {
-                    if !frame.is_end_of_message() {
-                        self.cancelled_incoming_messages.insert(message_id);
-                    }
-                    let event = MessageStreamEvent::Received {
-                        message_id,
-                        result: Err(e),
-                    };
-                    self.event_queue.push_back(event);
-                    self.metrics.decode_frame_failures.increment();
-                }
-                Ok(None) => {}
-                Ok(Some(message)) => {
-                    let event = MessageStreamEvent::Received {
-                        message_id,
-                        result: Ok(message),
-                    };
-                    self.event_queue.push_back(event);
-                }
-            }
-        }
-        did_something
+        //     let result = if frame.is_error() {
+        //         Err(track!(ErrorKind::InvalidInput.error()).into())
+        //     } else {
+        //         track!(
+        //             self.incoming_frame_handler.handle_frame(&frame),
+        //             "frame.data.len={}",
+        //             frame.data().len()
+        //         )
+        //     };
+        //     match result {
+        //         Err(e) => {
+        //             if !frame.is_end_of_message() {
+        //                 self.cancelled_incoming_messages.insert(message_id);
+        //             }
+        //             let event = MessageStreamEvent::Received {
+        //                 message_id,
+        //                 result: Err(e),
+        //             };
+        //             self.event_queue.push_back(event);
+        //             self.metrics.decode_frame_failures.increment();
+        //         }
+        //         Ok(None) => {}
+        //         Ok(Some(message)) => {
+        //             let event = MessageStreamEvent::Received {
+        //                 message_id,
+        //                 result: Ok(message),
+        //             };
+        //             self.event_queue.push_back(event);
+        //         }
+        //     }
+        // }
+        // did_something
+        // TODO:
+        unimplemented!()
     }
 }
-impl<H: HandleFrame> Stream for MessageStream<H> {
-    type Item = MessageStreamEvent<H::Item>;
+impl<A: AssignIncomingMessageHandler> Stream for MessageStream<A> {
+    type Item = MessageStreamEvent<<A::Handler as Decode>::Item>;
     type Error = Error;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        loop {
-            let eos = track!(self.frame_stream.poll())?.is_ready();
-            if eos {
-                return Ok(Async::Ready(None));
-            }
+        // loop {
+        //     let eos = track!(self.frame_stream.poll())?.is_ready();
+        //     if eos {
+        //         return Ok(Async::Ready(None));
+        //     }
 
-            let is_send_buf_updated = self.handle_outgoing_messages();
-            let is_recv_buf_updated = self.handle_incoming_frames();
-            if !(is_send_buf_updated || is_recv_buf_updated) {
-                break;
-            }
-        }
+        //     let is_send_buf_updated = self.handle_outgoing_messages();
+        //     let is_recv_buf_updated = self.handle_incoming_frames();
+        //     if !(is_send_buf_updated || is_recv_buf_updated) {
+        //         break;
+        //     }
+        // }
 
-        // FIXME: parameterize
-        track_assert!(
-            self.outgoing_messages.len() <= 10_000,
-            ErrorKind::Other,
-            "This stream may be overloaded"
-        );
+        // // FIXME: parameterize
+        // track_assert!(
+        //     self.outgoing_messages.len() <= 10_000,
+        //     ErrorKind::Other,
+        //     "This stream may be overloaded"
+        // );
 
-        if let Some(event) = self.event_queue.pop_front() {
-            Ok(Async::Ready(Some(event)))
-        } else {
-            Ok(Async::NotReady)
-        }
+        // if let Some(event) = self.event_queue.pop_front() {
+        //     Ok(Async::Ready(Some(event)))
+        // } else {
+        //     Ok(Async::NotReady)
+        // }
+        // TODO:
+        unimplemented!()
     }
 }
 

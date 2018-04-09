@@ -77,7 +77,6 @@ extern crate trackable;
 
 pub use error::{Error, ErrorKind};
 
-// pub mod codec; TODO: delete
 pub mod client {
     //! RPC client.
 
@@ -99,10 +98,9 @@ mod client_service;
 mod client_side_channel;
 mod client_side_handlers;
 mod error;
-mod frame;
-mod frame_stream;
 mod message;
 mod message_stream;
+mod packet;
 mod rpc_client;
 mod rpc_server;
 mod server_side_channel;

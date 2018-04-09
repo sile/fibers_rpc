@@ -1,8 +1,60 @@
 use std::fmt;
-use bytecodec::{Encode, Eos};
+use bytecodec::{self, Decode, Encode, Eos};
 use byteorder::{BigEndian, ByteOrder};
 
 use {ErrorKind, ProcedureId, Result};
+
+#[derive(Debug, Clone)]
+pub struct MessageHeader {
+    pub id: MessageId,
+    pub kind: MessageKind,
+    pub procedure: ProcedureId,
+    pub priority: u8,
+}
+impl MessageHeader {
+    pub const SIZE: usize = 8 + 1 + 4 + 1;
+
+    pub fn write(&self, buf: &mut [u8]) {
+        BigEndian::write_u64(buf, self.id.as_u64());
+        buf[8] = self.kind as u8;
+        BigEndian::write_u32(&mut buf[9..], self.procedure.0);
+        buf[13] = self.priority;
+    }
+
+    pub fn read(buf: &[u8]) -> bytecodec::Result<Self> {
+        let id = MessageId::from_u64(BigEndian::read_u64(buf));
+        let kind = match buf[8] {
+            0 => MessageKind::Notification,
+            1 => MessageKind::Request,
+            2 => MessageKind::Response,
+            n => track_panic!(
+                bytecodec::ErrorKind::InvalidInput,
+                "Unknown message kind: {}",
+                n
+            ),
+        };
+        let procedure = ProcedureId(BigEndian::read_u32(&buf[9..]));
+        let priority = buf[13];
+        Ok(MessageHeader {
+            id,
+            kind,
+            procedure,
+            priority,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MessageKind {
+    Notification = 0,
+    Request = 1,
+    Response = 2,
+}
+
+pub trait AssignIncomingMessageHandler {
+    type Handler: Decode;
+    fn assign_incoming_message_handler(&self, header: &MessageHeader) -> Result<Self::Handler>;
+}
 
 /// Message identifier.
 ///
@@ -17,6 +69,7 @@ use {ErrorKind, ProcedureId, Result};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct MessageId(u64);
 impl MessageId {
+    // TODO: remove
     pub fn new_client_side_id() -> Self {
         MessageId(0)
     }

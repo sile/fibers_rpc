@@ -2,15 +2,14 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
-use bytecodec::{Decode, Eos};
+use bytecodec::Decode;
 use fibers::sync::oneshot;
 use fibers::time::timer::{self, Timeout};
 use futures::{Async, Future, Poll};
 use trackable::error::ErrorKindExt;
 
 use {Error, ErrorKind, Result};
-use frame::{Frame, HandleFrame};
-use message::MessageId;
+use message::{AssignIncomingMessageHandler, MessageHeader, MessageId};
 use metrics::ClientMetrics;
 
 /// `Future` that represents a response from a RPC server.
@@ -56,10 +55,10 @@ impl<T> Future for Response<T> {
 }
 
 #[derive(Default)]
-pub struct IncomingFrameHandler {
+pub struct Assigner {
     handlers: HashMap<MessageId, BoxResponseHandler>,
 }
-impl IncomingFrameHandler {
+impl Assigner {
     pub fn new() -> Self {
         Self::default()
     }
@@ -72,38 +71,21 @@ impl IncomingFrameHandler {
         self.handlers.insert(message_id, handler);
     }
 }
-impl HandleFrame for IncomingFrameHandler {
-    type Item = ();
-    fn handle_frame(&mut self, frame: &Frame) -> Result<Option<Self::Item>> {
-        let eos = if let Some(handler) = self.handlers.get_mut(&frame.message_id()) {
-            track!(handler.handle_frame(frame))?.is_some()
-        } else {
-            false
-        };
-        if eos {
-            self.handlers.remove(&frame.message_id());
-            Ok(Some(()))
-        } else {
-            Ok(None)
-        }
-    }
-    fn handle_error(&mut self, message_id: MessageId, error: Error) {
-        if let Some(mut handler) = self.handlers.remove(&message_id) {
-            handler.handle_error(message_id, error);
-        }
+impl AssignIncomingMessageHandler for Assigner {
+    type Handler = BoxResponseHandler;
+
+    fn assign_incoming_message_handler(&self, header: &MessageHeader) -> Result<Self::Handler> {
+        let handler = track_assert_some!(self.handlers.remove(&header.id), ErrorKind::InvalidInput);
+        Ok(handler)
     }
 }
-impl fmt::Debug for IncomingFrameHandler {
+impl fmt::Debug for Assigner {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "IncomingFrameHandler {{ handlers.len: {} }}",
-            self.handlers.len()
-        )
+        write!(f, "Assigner {{ handlers.len: {} }}", self.handlers.len())
     }
 }
 
-pub type BoxResponseHandler = Box<HandleFrame<Item = ()> + Send + 'static>;
+pub type BoxResponseHandler = Box<Decode<Item = ()> + Send + 'static>;
 
 #[derive(Debug)]
 pub struct ResponseHandler<D: Decode> {
@@ -129,24 +111,25 @@ impl<D: Decode> ResponseHandler<D> {
         (handler, response)
     }
 }
-impl<D: Decode> HandleFrame for ResponseHandler<D> {
-    type Item = ();
-    fn handle_frame(&mut self, frame: &Frame) -> Result<Option<Self::Item>> {
-        let eos = Eos::new(frame.is_end_of_message());
-        let (_size, item) = track!(self.decoder.decode(frame.data(), eos))?;
-        if let Some(response) = item {
-            // TODO: validate `_size`
-            let reply_tx = self.reply_tx.take().expect("Never fails");
-            reply_tx.exit(Ok(response));
-            self.metrics.ok_responses.increment();
-            Ok(Some(()))
-        } else {
-            Ok(None)
-        }
-    }
-    fn handle_error(&mut self, _message_id: MessageId, error: Error) {
-        let reply_tx = self.reply_tx.take().expect("Never fails");
-        reply_tx.exit(Err(error));
-        self.metrics.error_responses.increment();
-    }
-}
+// TODO:
+// impl<D: Decode> HandleFrame for ResponseHandler<D> {
+//     type Item = ();
+//     fn handle_frame(&mut self, frame: &Frame) -> Result<Option<Self::Item>> {
+//         let eos = Eos::new(frame.is_end_of_message());
+//         let (_size, item) = track!(self.decoder.decode(frame.data(), eos))?;
+//         if let Some(response) = item {
+//             // TODO: validate `_size`
+//             let reply_tx = self.reply_tx.take().expect("Never fails");
+//             reply_tx.exit(Ok(response));
+//             self.metrics.ok_responses.increment();
+//             Ok(Some(()))
+//         } else {
+//             Ok(None)
+//         }
+//     }
+//     fn handle_error(&mut self, _message_id: MessageId, error: Error) {
+//         let reply_tx = self.reply_tx.take().expect("Never fails");
+//         reply_tx.exit(Err(error));
+//         self.metrics.error_responses.increment();
+//     }
+// }

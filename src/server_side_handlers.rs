@@ -3,14 +3,12 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use bytecodec::{Decode, Encode, Eos};
-use byteorder::{BigEndian, ByteOrder};
 use factory::Factory;
 use futures::{Async, Future, Poll};
 use futures::future::Either;
 
-use {Call, Cast, Error, ErrorKind, ProcedureId, Result};
-use frame::{Frame, HandleFrame};
-use message::{MessageId, OutgoingMessage};
+use {Call, Cast, ErrorKind, ProcedureId, Result};
+use message::{AssignIncomingMessageHandler, MessageHeader, MessageId, OutgoingMessage};
 use metrics::HandlerMetrics;
 
 pub type MessageHandlers = HashMap<ProcedureId, Box<MessageHandlerFactory>>;
@@ -156,72 +154,77 @@ pub enum Action {
     NoReply(NoReply),
 }
 
-pub struct IncomingFrameHandler {
+pub struct Assigner {
     handlers: Arc<MessageHandlers>,
     runnings: HashMap<MessageId, Box<HandleMessage>>,
 }
-impl IncomingFrameHandler {
+impl Assigner {
     pub fn new(mut handlers: MessageHandlers) -> Self {
         handlers.shrink_to_fit();
-        IncomingFrameHandler {
+        Assigner {
             handlers: Arc::new(handlers),
             runnings: HashMap::new(),
         }
     }
 }
-impl HandleFrame for IncomingFrameHandler {
-    type Item = Action;
+impl AssignIncomingMessageHandler for Assigner {
+    type Handler = Box<Decode<Item = Action> + Send + 'static>;
 
-    #[cfg_attr(feature = "cargo-clippy", allow(map_entry))]
-    fn handle_frame(&mut self, frame: &Frame) -> Result<Option<Self::Item>> {
-        debug_assert!(!frame.is_error());
-
-        let mut offset = 0;
-        if !self.runnings.contains_key(&frame.message_id()) {
-            debug_assert!(frame.data().len() >= 4);
-            let procedure = ProcedureId(BigEndian::read_u32(frame.data()));
-            offset = 4;
-
-            let factory = track_assert_some!(
-                self.handlers.get(&procedure),
-                ErrorKind::InvalidInput,
-                "Unregistered RPC: {:?}",
-                procedure,
-            );
-            let handler = factory.create_message_handler(frame.message_id());
-            self.runnings.insert(frame.message_id(), handler);
-        }
-
-        let mut handler = self.runnings
-            .remove(&frame.message_id())
-            .expect("Never fails");
-        track!(handler.handle_message(&frame.data()[offset..], frame.is_end_of_message()))?;
-        if frame.is_end_of_message() {
-            let action = track!(handler.finish(frame.priority()))?;
-            Ok(Some(action))
-        } else {
-            self.runnings.insert(frame.message_id(), handler);
-            Ok(None)
-        }
+    fn assign_incoming_message_handler(&self, header: &MessageHeader) -> Result<Self::Handler> {
+        unimplemented!()
     }
 
-    fn handle_error(&mut self, message_id: MessageId, _error: Error) {
-        self.runnings.remove(&message_id);
-    }
+    // TODO: delete
+    // #[cfg_attr(feature = "cargo-clippy", allow(map_entry))]
+    // fn handle_frame(&mut self, frame: &Frame) -> Result<Option<Self::Item>> {
+    //     debug_assert!(!frame.is_error());
+
+    //     let mut offset = 0;
+    //     if !self.runnings.contains_key(&frame.message_id()) {
+    //         debug_assert!(frame.data().len() >= 4);
+    //         let procedure = ProcedureId(BigEndian::read_u32(frame.data()));
+    //         offset = 4;
+
+    //         let factory = track_assert_some!(
+    //             self.handlers.get(&procedure),
+    //             ErrorKind::InvalidInput,
+    //             "Unregistered RPC: {:?}",
+    //             procedure,
+    //         );
+    //         let handler = factory.create_message_handler(frame.message_id());
+    //         self.runnings.insert(frame.message_id(), handler);
+    //     }
+
+    //     let mut handler = self.runnings
+    //         .remove(&frame.message_id())
+    //         .expect("Never fails");
+    //     track!(handler.handle_message(&frame.data()[offset..], frame.is_end_of_message()))?;
+    //     if frame.is_end_of_message() {
+    //         let action = track!(handler.finish(frame.priority()))?;
+    //         Ok(Some(action))
+    //     } else {
+    //         self.runnings.insert(frame.message_id(), handler);
+    //         Ok(None)
+    //     }
+    // }
+
+    // fn handle_error(&mut self, message_id: MessageId, _error: Error) {
+    //     self.runnings.remove(&message_id);
+    // }
 }
-impl fmt::Debug for IncomingFrameHandler {
+impl fmt::Debug for Assigner {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "IncomingFrameHandler {{ handlers.len: {}, runnings.len: {} }}",
+            "Assigner {{ handlers.len: {}, runnings.len: {} }}",
             self.handlers.len(),
             self.runnings.len()
         )
     }
 }
-impl Clone for IncomingFrameHandler {
+impl Clone for Assigner {
     fn clone(&self) -> Self {
-        IncomingFrameHandler {
+        Assigner {
             handlers: Arc::clone(&self.handlers),
             runnings: HashMap::new(),
         }

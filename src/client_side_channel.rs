@@ -11,16 +11,14 @@ use slog::Logger;
 use trackable::error::ErrorKindExt;
 
 use {Error, ErrorKind, Result};
-use client_side_handlers::{BoxResponseHandler, IncomingFrameHandler};
-use frame::HandleFrame;
-use frame_stream::FrameStream;
+use client_side_handlers::{Assigner, BoxResponseHandler};
 use message::{MessageId, OutgoingMessage};
 use message_stream::{MessageStream, MessageStreamEvent};
 use metrics::{ChannelMetrics, ClientMetrics};
 
 pub const DEFAULT_KEEP_ALIVE_TIMEOUT_SECS: u64 = 60 * 10;
 
-#[derive(Debug)]
+// TODO: #[derive(Debug)]
 pub struct ClientSideChannel {
     logger: Logger,
     server: SocketAddr,
@@ -130,8 +128,8 @@ impl ClientSideChannel {
                         buffer.len()
                     );
                     let stream = MessageStream::new(
-                        FrameStream::new(stream),
-                        IncomingFrameHandler::new(),
+                        stream,
+                        Assigner::new(),
                         self.metrics.channels().create_channel_metrics(self.server),
                     );
                     let mut connected = MessageStreamState::Connected { stream };
@@ -172,9 +170,10 @@ impl ClientSideChannel {
                             result: Err(e),
                         } => {
                             error!(self.logger, "Cannot send message({:?}): {}", message_id, e);
-                            stream
-                                .incoming_frame_handler_mut()
-                                .handle_error(message_id, e);
+                            // TODO
+                            // stream
+                            //     .incoming_frame_handler_mut()
+                            //     .handle_error(message_id, e);
                         }
                         MessageStreamEvent::Received {
                             message_id,
@@ -184,9 +183,10 @@ impl ClientSideChannel {
                                 self.logger,
                                 "Cannot receive message({:?}): {}", message_id, e
                             );
-                            stream
-                                .incoming_frame_handler_mut()
-                                .handle_error(message_id, e);
+                            // TODO
+                            // stream
+                            //     .incoming_frame_handler_mut()
+                            //     .handle_error(message_id, e);
                         }
                         _ => {}
                     }
@@ -230,7 +230,7 @@ impl Drop for ClientSideChannel {
 }
 
 #[cfg_attr(feature = "cargo-clippy", allow(large_enum_variant))]
-#[derive(Debug)]
+// TODO: #[derive(Debug)]
 enum MessageStreamState {
     Wait {
         timeout: Timeout,
@@ -240,7 +240,7 @@ enum MessageStreamState {
         future: Connect,
     },
     Connected {
-        stream: MessageStream<IncomingFrameHandler>,
+        stream: MessageStream<Assigner>,
     },
 }
 impl MessageStreamState {
@@ -269,7 +269,8 @@ impl MessageStreamState {
                 if let Some(mut handler) = handler {
                     let e = ErrorKind::Unavailable
                         .cause("TCP stream disconnected (waiting for reconnecting)");
-                    handler.handle_error(message_id, track!(e).into());
+                    // TODO:
+                    // handler.handle_error(message_id, track!(e).into());
                 }
             }
             MessageStreamState::Connecting { ref mut buffer, .. } => {
@@ -283,7 +284,7 @@ impl MessageStreamState {
                 stream.send_message(message_id, message);
                 if let Some(handler) = handler {
                     stream
-                        .incoming_frame_handler_mut()
+                        .assigner_mut()
                         .register_response_handler(message_id, handler);
                 }
             }

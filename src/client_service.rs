@@ -205,7 +205,7 @@ enum Command {
     },
 }
 
-#[derive(Debug)]
+// TODO: #[derive(Debug)]
 struct Channel {
     inner: ClientSideChannel,
     message_rx: mpsc::Receiver<Message>,

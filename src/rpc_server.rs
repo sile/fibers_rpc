@@ -15,8 +15,8 @@ use {Call, Cast, Error, ProcedureId};
 use message::{MessageId, OutgoingMessage};
 use metrics::{HandlerMetrics, ServerMetrics};
 use server_side_channel::ServerSideChannel;
-use server_side_handlers::{Action, CallHandlerFactory, CastHandlerFactory, HandleCall, HandleCast,
-                           IncomingFrameHandler, MessageHandlers, Never};
+use server_side_handlers::{Action, Assigner, CallHandlerFactory, CastHandlerFactory, HandleCall,
+                           HandleCast, MessageHandlers, Never};
 
 /// RPC server builder.
 pub struct ServerBuilder {
@@ -208,7 +208,7 @@ impl ServerBuilder {
             listener: Listener::Binding(TcpListener::bind(self.bind_addr)),
             logger,
             spawner,
-            incoming_frame_handler: IncomingFrameHandler::new(handlers),
+            assigner: Assigner::new(handlers),
             metrics: ServerMetrics::new(self.metrics.clone(), self.handlers_metrics.clone()),
         }
     }
@@ -221,7 +221,7 @@ pub struct Server<S> {
     listener: Listener,
     logger: Logger,
     spawner: S,
-    incoming_frame_handler: IncomingFrameHandler,
+    assigner: Assigner,
     metrics: ServerMetrics,
 }
 impl<S> Server<S> {
@@ -247,16 +247,12 @@ where
                 let channels = self.metrics.channels().clone();
                 let exit_logger = logger.clone();
                 let spawner = self.spawner.clone().boxed();
-                let incoming_frame_handler = self.incoming_frame_handler.clone();
+                let assigner = self.assigner.clone();
                 let future = client
                     .map_err(|e| track!(Error::from(e)))
                     .and_then(move |stream| {
-                        let channel = ServerSideChannel::new(
-                            logger,
-                            stream,
-                            incoming_frame_handler.clone(),
-                            metrics,
-                        );
+                        let channel =
+                            ServerSideChannel::new(logger, stream, assigner.clone(), metrics);
                         ChannelHandler::new(spawner, channel)
                     });
                 self.spawner.spawn(future.then(move |result| {
