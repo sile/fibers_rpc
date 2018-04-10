@@ -66,3 +66,21 @@ executor.spawn(service.map_err(|e| panic!("{}", e)));
 let result = executor.run_future(response).unwrap();
 assert_eq!(result.ok(), Some(request));
 ```
+
+Informal benchmark result (v0.2.1):
+
+```consule
+$ uname -a
+Linux DESKTOP 4.4.0-43-Microsoft #1-Microsoft Wed Dec 31 14:42:53 PST 2014 x86_64 x86_64 x86_64 GNU/Linux
+
+$ lscpu | grep 'Model name:'
+Model name:            Intel(R) Core(TM) i7-7660U CPU @ 2.50GHz
+
+// Runs the example echo server in a shell.
+$ cargo run --example echo --release -- server
+
+// Executes a benchmark command in another shell.
+$ echo "hello" | cargo run --example echo --release -- bench -c 1024 -n 1000000
+# ELAPSED: 8.111424
+# RPS: 123282.91555218912
+```
