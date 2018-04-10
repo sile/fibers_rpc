@@ -126,7 +126,7 @@ fn main() {
     if let Some(_matches) = matches.subcommand_matches("server") {
         let server = ServerBuilder::new(addr)
             .logger(logger)
-            .call_handler(EchoHandler)
+            .add_call_handler(EchoHandler)
             .finish(executor.handle());
         let fiber = executor.spawn_monitor(server);
         let _ = track_try_unwrap!(executor.run_fiber(fiber).map_err(Failure::from_error))
@@ -160,6 +160,7 @@ fn main() {
             let response = track_try_unwrap!(result);
             let _ = std::io::stdout().write(&response);
         }
+        let _ = std::io::stdout().flush();
     } else if let Some(matches) = matches.subcommand_matches("bench") {
         let concurrency: usize = track_try_unwrap!(track_any_err!(
             matches.value_of("CONCURRENCY").unwrap().parse()

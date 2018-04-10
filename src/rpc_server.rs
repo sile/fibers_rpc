@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::mem;
 use std::net::SocketAddr;
-use slog::{Discard, Logger};
+use bytecodec::marker::Never;
 use factory::{DefaultFactory, Factory};
 use fibers::{BoxSpawn, Spawn};
 use fibers::net::TcpListener;
@@ -10,13 +10,14 @@ use fibers::net::streams::Incoming;
 use fibers::sync::mpsc;
 use futures::{Async, Future, Poll, Stream};
 use prometrics::metrics::MetricBuilder;
+use slog::{Discard, Logger};
 
 use {Call, Cast, Error, ProcedureId};
-use message::{MessageId, OutgoingMessage};
+use message::OutgoingMessage;
 use metrics::{HandlerMetrics, ServerMetrics};
 use server_side_channel::ServerSideChannel;
 use server_side_handlers::{Action, Assigner, CallHandlerFactory, CastHandlerFactory, HandleCall,
-                           HandleCast, MessageHandlers, Never};
+                           HandleCast, MessageHandlers};
 
 /// RPC server builder.
 pub struct ServerBuilder {
@@ -56,63 +57,62 @@ impl ServerBuilder {
 
     /// Registers a handler for the request/response RPC.
     ///
-    /// TODO: update doc
-    ///
     /// This equivalent to
-    /// `call_handler_with_codec(handler, DefaultDecoderMaker::new(), IntoEncoderMaker::new())`.
+    /// `add_call_handler_with_codec(handler, DefaultFactory::new(), DefaultFactory::new())`.
     ///
     /// # Panices
     ///
     /// If a procedure which has `T::ID` already have been registered, the calling thread will panic.
-    pub fn call_handler<T, H>(&mut self, handler: H) -> &mut Self
+    pub fn add_call_handler<T, H>(&mut self, handler: H) -> &mut Self
     where
         T: Call,
-        T::Req: Send, // TODO: delete
         H: HandleCall<T>,
         T::ReqDecoder: Default,
         T::ResEncoder: Default,
     {
-        self.call_handler_with_codec(handler, DefaultFactory::new(), DefaultFactory::new())
+        self.add_call_handler_with_codec(handler, DefaultFactory::new(), DefaultFactory::new())
     }
 
     /// Registers a handler (with the given decoder maker) for the request/response RPC.
     ///
-    /// TODO: update doc
-    ///
-    /// This equivalent to `call_handler_with_codec(handler, decoder_maker, IntoEncoderMaker::new())`.
+    /// This equivalent to `add_call_handler_with_codec(handler, decoder_factory, DefaultFactory::new())`.
     ///
     /// # Panices
     ///
     /// If a procedure which has `T::ID` already have been registered, the calling thread will panic.
-    pub fn call_handler_with_decoder<T, H, D>(&mut self, handler: H, decoder_maker: D) -> &mut Self
+    pub fn add_call_handler_with_decoder<T, H, D>(
+        &mut self,
+        handler: H,
+        decoder_factory: D,
+    ) -> &mut Self
     where
         T: Call,
-        T::Req: Send, // TODO: delete
         H: HandleCall<T>,
         D: Factory<Item = T::ReqDecoder> + Send + Sync + 'static,
         T::ResEncoder: Default,
     {
-        self.call_handler_with_codec(handler, decoder_maker, DefaultFactory::new())
+        self.add_call_handler_with_codec(handler, decoder_factory, DefaultFactory::new())
     }
 
     /// Registers a handler (with the given encoder maker) for the request/response RPC.
     ///
-    /// TODO: update doc
-    ///
-    /// This equivalent to `call_handler_with_codec(handler, DefaultDecoderMaker::new(), encoder_maker)`.
+    /// This equivalent to `add_call_handler_with_codec(handler, DefaultFactory::new(), encoder_factory)`.
     ///
     /// # Panices
     ///
     /// If a procedure which has `T::ID` already have been registered, the calling thread will panic.
-    pub fn call_handler_with_encoder<T, H, E>(&mut self, handler: H, encoder_maker: E) -> &mut Self
+    pub fn add_call_handler_with_encoder<T, H, E>(
+        &mut self,
+        handler: H,
+        encoder_factory: E,
+    ) -> &mut Self
     where
         T: Call,
-        T::Req: Send, // TODO: delete
         H: HandleCall<T>,
         E: Factory<Item = T::ResEncoder> + Send + Sync + 'static,
         T::ReqDecoder: Default,
     {
-        self.call_handler_with_codec(handler, DefaultFactory::new(), encoder_maker)
+        self.add_call_handler_with_codec(handler, DefaultFactory::new(), encoder_factory)
     }
 
     /// Registers a handler (with the given decoder/encoder makers) for the request/response RPC.
@@ -120,15 +120,14 @@ impl ServerBuilder {
     /// # Panices
     ///
     /// If a procedure which has `T::ID` already have been registered, the calling thread will panic.
-    pub fn call_handler_with_codec<T, H, D, E>(
+    pub fn add_call_handler_with_codec<T, H, D, E>(
         &mut self,
         handler: H,
-        decoder_maker: D,
-        encoder_maker: E,
+        decoder_factory: D,
+        encoder_factory: E,
     ) -> &mut Self
     where
         T: Call,
-        T::Req: Send, // TODO: delete
         H: HandleCall<T>,
         D: Factory<Item = T::ReqDecoder> + Send + Sync + 'static,
         E: Factory<Item = T::ResEncoder> + Send + Sync + 'static,
@@ -143,28 +142,25 @@ impl ServerBuilder {
         let metrics = HandlerMetrics::new(self.metrics.clone(), T::ID, T::NAME, "call");
         self.handlers_metrics.insert(T::ID, metrics.clone());
 
-        let handler = CallHandlerFactory::new(handler, decoder_maker, encoder_maker, metrics);
+        let handler = CallHandlerFactory::new(handler, decoder_factory, encoder_factory, metrics);
         self.handlers.insert(T::ID, Box::new(handler));
         self
     }
 
     /// Registers a handler for the notification RPC.
     ///
-    /// TODO: update doc
-    ///
-    /// This equivalent to `cast_handler_with_encoder(handler, DefaultDecoderMaker::new())`.
+    /// This equivalent to `add_cast_handler_with_encoder(handler, DefaultFactory::new())`.
     ///
     /// # Panices
     ///
     /// If a procedure which has `T::ID` already have been registered, the calling thread will panic.
-    pub fn cast_handler<T, H>(&mut self, handler: H) -> &mut Self
+    pub fn add_cast_handler<T, H>(&mut self, handler: H) -> &mut Self
     where
         T: Cast,
-        T::Notification: Send, // TODO: delete
         H: HandleCast<T>,
         T::Decoder: Default,
     {
-        self.cast_handler_with_decoder(handler, DefaultFactory::new())
+        self.add_cast_handler_with_decoder(handler, DefaultFactory::new())
     }
 
     /// Registers a handler (with the given decoder maker) for the notification RPC.
@@ -172,10 +168,13 @@ impl ServerBuilder {
     /// # Panices
     ///
     /// If a procedure which has `T::ID` already have been registered, the calling thread will panic.
-    pub fn cast_handler_with_decoder<T, H, D>(&mut self, handler: H, decoder_maker: D) -> &mut Self
+    pub fn add_cast_handler_with_decoder<T, H, D>(
+        &mut self,
+        handler: H,
+        decoder_factory: D,
+    ) -> &mut Self
     where
         T: Cast,
-        T::Notification: Send, // TODO: delete
         H: HandleCast<T>,
         D: Factory<Item = T::Decoder> + Send + Sync + 'static,
     {
@@ -189,7 +188,7 @@ impl ServerBuilder {
         let metrics = HandlerMetrics::new(self.metrics.clone(), T::ID, T::NAME, "cast");
         self.handlers_metrics.insert(T::ID, metrics.clone());
 
-        let handler = CastHandlerFactory::new(handler, decoder_maker, metrics);
+        let handler = CastHandlerFactory::new(handler, decoder_factory, metrics);
         self.handlers.insert(T::ID, Box::new(handler));
         self
     }
@@ -276,8 +275,8 @@ where
 struct ChannelHandler {
     spawner: BoxSpawn,
     channel: ServerSideChannel,
-    reply_tx: mpsc::Sender<(MessageId, OutgoingMessage)>,
-    reply_rx: mpsc::Receiver<(MessageId, OutgoingMessage)>,
+    reply_tx: mpsc::Sender<OutgoingMessage>,
+    reply_rx: mpsc::Receiver<OutgoingMessage>,
 }
 impl ChannelHandler {
     fn new(spawner: BoxSpawn, channel: ServerSideChannel) -> Self {
@@ -305,12 +304,12 @@ impl Future for ChannelHandler {
                             }
                         }
                         Action::Reply(mut reply) => {
-                            if let Some((message_id, message)) = reply.try_take() {
-                                self.channel.reply(message_id, message);
+                            if let Some(message) = reply.try_take() {
+                                self.channel.reply(message);
                             } else {
                                 let reply_tx = self.reply_tx.clone();
-                                let future = reply.map(move |(message_id, message)| {
-                                    let _ = reply_tx.send((message_id, message));
+                                let future = reply.map(move |message| {
+                                    let _ = reply_tx.send(message);
                                 });
                                 self.spawner.spawn(future.map_err(|_: Never| ()));
                             }
@@ -323,8 +322,8 @@ impl Future for ChannelHandler {
 
             let mut do_break = true;
             while let Async::Ready(item) = self.reply_rx.poll().expect("Never fails") {
-                let (message_id, message) = item.expect("Never fails");
-                self.channel.reply(message_id, message);
+                let message = item.expect("Never fails");
+                self.channel.reply(message);
                 do_break = false;
             }
             if do_break {

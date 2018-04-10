@@ -89,7 +89,7 @@ pub mod server {
     //! RPC server.
 
     pub use rpc_server::{Server, ServerBuilder};
-    pub use server_side_handlers::{HandleCall, HandleCast, Never, NoReply, Reply};
+    pub use server_side_handlers::{HandleCall, HandleCast, NoReply, Reply};
 }
 
 use client::{CallClient, CastClient, ClientServiceHandle};
@@ -261,7 +261,7 @@ mod test {
         // Server
         let server_addr = "127.0.0.1:1920".parse().unwrap();
         let server = ServerBuilder::new(server_addr)
-            .call_handler(EchoHandler)
+            .add_call_handler(EchoHandler)
             .finish(executor.handle());
         executor.spawn(server.map_err(|e| panic!("{}", e)));
 
@@ -284,7 +284,7 @@ mod test {
         // Server
         let server_addr = "127.0.0.1:1921".parse().unwrap();
         let server = ServerBuilder::new(server_addr)
-            .call_handler(EchoHandler)
+            .add_call_handler(EchoHandler)
             .finish(executor.handle());
         executor.spawn(server.map_err(|e| panic!("{}", e)));
 

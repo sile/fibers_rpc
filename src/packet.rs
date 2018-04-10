@@ -1,66 +1,51 @@
 use std::cmp;
 use bytecodec::{self, ByteCount, Decode, Encode, Eos};
 use bytecodec::bytes::CopyableBytesDecoder;
+use bytecodec::marker::Never;
 use byteorder::{BigEndian, ByteOrder};
 
-use message::{MessageHeader, MessageId};
+use message::{MessageHeader, OutgoingMessage};
 
 pub const MIN_PACKET_LEN: usize = PacketHeader::SIZE;
-const MAX_PAYLOAD_LEN: usize = 0xFFFF;
+pub const MAX_PACKET_LEN: usize = PacketHeader::SIZE + MAX_PAYLOAD_LEN;
+pub const MAX_PAYLOAD_LEN: usize = 0xFFFF;
 
-#[derive(Debug, Copy, Clone)]
-pub enum PacketKind {
-    MiddleOfMessage = 0,
-    EndOfMessage = 1,
-    Error = 2,
-    Cancel = 3,
-}
-impl PacketKind {
-    fn from_u8(n: u8) -> bytecodec::Result<Self> {
-        Ok(match n {
-            0 => PacketKind::MiddleOfMessage,
-            1 => PacketKind::EndOfMessage,
-            2 => PacketKind::Error,
-            3 => track_panic!(bytecodec::ErrorKind::Other, "Unimplemented"),
-            _ => track_panic!(
-                bytecodec::ErrorKind::InvalidInput,
-                "Unknown packet kind: {}",
-                n
-            ),
-        })
-    }
-}
+const FLAG_END_OF_MESSAGE: u8 = 0b0000_0001;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PacketHeader {
-    message: MessageHeader,
-    kind: PacketKind,
-    payload_len: u16,
+    pub message: MessageHeader,
+    pub flags: u8,
+    pub payload_len: u16,
 }
 impl PacketHeader {
     pub const SIZE: usize = MessageHeader::SIZE + 1 + 2;
 
     fn write(&self, buf: &mut [u8]) {
         self.message.write(buf);
-        buf[MessageHeader::SIZE] = self.kind as u8;
+        buf[MessageHeader::SIZE] = self.flags;
         BigEndian::write_u16(&mut buf[MessageHeader::SIZE + 1..], self.payload_len);
     }
 
-    fn read(buf: &[u8]) -> bytecodec::Result<Self> {
-        let message = track!(MessageHeader::read(buf))?;
-        let kind = track!(PacketKind::from_u8(buf[MessageHeader::SIZE]))?;
+    fn read(buf: &[u8]) -> Self {
+        let message = MessageHeader::read(buf);
+        let flags = buf[MessageHeader::SIZE];
         let payload_len = BigEndian::read_u16(&buf[MessageHeader::SIZE + 1..]);
-        Ok(PacketHeader {
+        PacketHeader {
             message,
-            kind,
+            flags,
             payload_len,
-        })
+        }
+    }
+
+    pub fn is_end_of_message(&self) -> bool {
+        (self.flags & FLAG_END_OF_MESSAGE) != 0
     }
 }
 
 #[derive(Debug, Default)]
 pub struct PacketHeaderDecoder {
-    bytes: CopyableBytesDecoder<[u8; 16]>,
+    bytes: CopyableBytesDecoder<[u8; PacketHeader::SIZE]>,
 }
 impl Decode for PacketHeaderDecoder {
     type Item = PacketHeader;
@@ -68,7 +53,7 @@ impl Decode for PacketHeaderDecoder {
     fn decode(&mut self, buf: &[u8], eos: Eos) -> bytecodec::Result<(usize, Option<Self::Item>)> {
         let (size, item) = track!(self.bytes.decode(buf, eos))?;
         if let Some(bytes) = item {
-            let header = track!(PacketHeader::read(&bytes[..]))?;
+            let header = PacketHeader::read(&bytes[..]);
             Ok((size, Some(header)))
         } else {
             Ok((size, None))
@@ -85,36 +70,35 @@ impl Decode for PacketHeaderDecoder {
 }
 
 #[derive(Debug)]
-pub struct PacketizedMessageEncoder<E> {
-    message_header: MessageHeader,
-    message_encoder: E,
+pub struct PacketizedMessage {
+    message: OutgoingMessage,
 }
-impl<E: Encode> PacketizedMessageEncoder<E> {
-    pub fn new(message_header: MessageHeader, message_encoder: E) -> Self {
-        PacketizedMessageEncoder {
-            message_header,
-            message_encoder,
-        }
+impl PacketizedMessage {
+    pub fn new(message: OutgoingMessage) -> Self {
+        PacketizedMessage { message }
+    }
+
+    pub fn header(&self) -> &MessageHeader {
+        &self.message.header
     }
 }
-impl<E: Encode> Encode for PacketizedMessageEncoder<E> {
-    type Item = ();
+impl Encode for PacketizedMessage {
+    type Item = Never;
 
     fn encode(&mut self, buf: &mut [u8], eos: Eos) -> bytecodec::Result<usize> {
         debug_assert!(buf.len() >= PacketHeader::SIZE);
 
         let limit = cmp::min(buf.len() - PacketHeader::SIZE, MAX_PAYLOAD_LEN);
         let payload_len = track!(
-            self.message_encoder
+            self.message
+                .payload
                 .encode(&mut buf[PacketHeader::SIZE..][..limit], eos)
         )?;
+
+        let flags = self.message.payload.is_idle() as u8 * FLAG_END_OF_MESSAGE;
         let packet_header = PacketHeader {
-            message: self.message_header.clone(),
-            kind: if self.message_encoder.is_idle() {
-                PacketKind::EndOfMessage
-            } else {
-                PacketKind::MiddleOfMessage
-            },
+            message: self.message.header.clone(),
+            flags,
             payload_len: payload_len as u16,
         };
         packet_header.write(buf);
@@ -126,7 +110,7 @@ impl<E: Encode> Encode for PacketizedMessageEncoder<E> {
     }
 
     fn is_idle(&self) -> bool {
-        self.message_encoder.is_idle()
+        self.message.payload.is_idle()
     }
 
     fn requiring_bytes(&self) -> ByteCount {

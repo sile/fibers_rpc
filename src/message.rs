@@ -1,174 +1,148 @@
 use std::fmt;
-use bytecodec::{self, Decode, Encode, Eos};
+use bytecodec::{self, ByteCount, Decode, Encode, EncodeExt, Eos};
+use bytecodec::marker::Never;
 use byteorder::{BigEndian, ByteOrder};
 
-use {ErrorKind, ProcedureId, Result};
+use {ProcedureId, Result};
 
 #[derive(Debug, Clone)]
 pub struct MessageHeader {
     pub id: MessageId,
-    pub kind: MessageKind,
     pub procedure: ProcedureId,
     pub priority: u8,
 }
 impl MessageHeader {
-    pub const SIZE: usize = 8 + 1 + 4 + 1;
+    pub const SIZE: usize = 8 + 4 + 1;
 
     pub fn write(&self, buf: &mut [u8]) {
-        BigEndian::write_u64(buf, self.id.as_u64());
-        buf[8] = self.kind as u8;
-        BigEndian::write_u32(&mut buf[9..], self.procedure.0);
-        buf[13] = self.priority;
+        BigEndian::write_u64(buf, self.id.0);
+        BigEndian::write_u32(&mut buf[8..], self.procedure.0);
+        buf[12] = self.priority;
     }
 
-    pub fn read(buf: &[u8]) -> bytecodec::Result<Self> {
-        let id = MessageId::from_u64(BigEndian::read_u64(buf));
-        let kind = match buf[8] {
-            0 => MessageKind::Notification,
-            1 => MessageKind::Request,
-            2 => MessageKind::Response,
-            n => track_panic!(
-                bytecodec::ErrorKind::InvalidInput,
-                "Unknown message kind: {}",
-                n
-            ),
-        };
-        let procedure = ProcedureId(BigEndian::read_u32(&buf[9..]));
-        let priority = buf[13];
-        Ok(MessageHeader {
+    pub fn read(buf: &[u8]) -> Self {
+        let id = MessageId(BigEndian::read_u64(buf));
+        let procedure = ProcedureId(BigEndian::read_u32(&buf[8..]));
+        let priority = buf[12];
+        MessageHeader {
             id,
-            kind,
             procedure,
             priority,
-        })
+        }
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MessageKind {
-    Notification = 0,
-    Request = 1,
-    Response = 2,
 }
 
 pub trait AssignIncomingMessageHandler {
     type Handler: Decode;
-    fn assign_incoming_message_handler(&self, header: &MessageHeader) -> Result<Self::Handler>;
+    fn assign_incoming_message_handler(&mut self, header: &MessageHeader) -> Result<Self::Handler>;
 }
 
 /// Message identifier.
 ///
 /// This value is unique within a channel.
 ///
-/// # MEMO
-///
-/// - Request and response messages has the same identifier
-/// - The most significant bit of `MessageId` indicates the origin of the RPC
-///    - `0` means it is started by clients
-///    - `1` means it is started by servers
+/// Note that request and response messages has the same identifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct MessageId(u64);
+pub struct MessageId(pub u64);
 impl MessageId {
-    // TODO: remove
-    pub fn new_client_side_id() -> Self {
-        MessageId(0)
-    }
-
     pub fn next(&mut self) -> Self {
         let n = self.0;
-        let msb = n >> 63;
-        self.0 = (msb << 63) | (n.wrapping_add(1) & ((1 << 63) - 1));
+        self.0 += 1;
         MessageId(n)
-    }
-
-    pub fn from_u64(n: u64) -> Self {
-        MessageId(n)
-    }
-
-    pub fn as_u64(&self) -> u64 {
-        self.0
     }
 }
 
+#[derive(Debug)]
 pub struct OutgoingMessage {
-    id: Option<ProcedureId>,
-    priority: u8,
-    encode: Box<FnMut(&mut [u8]) -> Result<usize> + Send + 'static>,
+    pub header: MessageHeader,
+    pub payload: OutgoingMessagePayload,
 }
-impl OutgoingMessage {
-    pub fn new<E>(id: Option<ProcedureId>, priority: u8, mut encoder: E) -> Self
+
+pub struct OutgoingMessagePayload(Box<Encode<Item = Never> + Send + 'static>);
+impl OutgoingMessagePayload {
+    pub fn new<E>(encoder: E) -> Self
     where
         E: Encode + Send + 'static,
     {
-        OutgoingMessage {
-            id,
-            priority,
-            encode: Box::new(move |buf| {
-                let message = track!(encoder.encode(buf, Eos::new(false)))?;
-                Ok(message)
-            }),
-        }
+        OutgoingMessagePayload(Box::new(encoder.last()))
     }
 
-    pub fn error() -> Self {
-        OutgoingMessage {
-            id: None,
-            priority: 128,
-            encode: Box::new(|_| track_panic!(ErrorKind::Other)),
-        }
-    }
-
-    pub fn priority(&self) -> u8 {
-        self.priority
-    }
-
-    pub fn encode(&mut self, buf: &mut [u8]) -> Result<usize> {
-        let offset = if let Some(id) = self.id.take() {
-            BigEndian::write_u32(buf, id.0);
-            4
-        } else {
-            0
+    pub fn with_item<E>(encoder: E, item: E::Item) -> Self
+    where
+        E: Encode + Send + 'static,
+        E::Item: Send + 'static,
+    {
+        let encoder = Lazy {
+            inner: encoder,
+            item: Some(item),
         };
-        let size = track!((self.encode)(&mut buf[offset..]))?;
-        Ok(offset + size)
+        Self::new(encoder)
     }
 }
-impl fmt::Debug for OutgoingMessage {
+impl fmt::Debug for OutgoingMessagePayload {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "OutgoingMessage(_)")
+        write!(f, "OutgoingMessagePayload(_)")
+    }
+}
+impl Encode for OutgoingMessagePayload {
+    type Item = Never;
+
+    fn encode(&mut self, buf: &mut [u8], eos: Eos) -> bytecodec::Result<usize> {
+        self.0.encode(buf, eos)
+    }
+
+    fn start_encoding(&mut self, item: Self::Item) -> bytecodec::Result<()> {
+        self.0.start_encoding(item)
+    }
+
+    fn is_idle(&self) -> bool {
+        self.0.is_idle()
+    }
+
+    fn requiring_bytes(&self) -> ByteCount {
+        self.0.requiring_bytes()
+    }
+}
+
+#[derive(Debug)]
+struct Lazy<E: Encode> {
+    inner: E,
+    item: Option<E::Item>,
+}
+impl<E: Encode> Encode for Lazy<E> {
+    type Item = Never;
+
+    fn encode(&mut self, buf: &mut [u8], eos: Eos) -> bytecodec::Result<usize> {
+        if let Some(item) = self.item.take() {
+            track!(self.inner.start_encoding(item))?;
+        }
+        track!(self.inner.encode(buf, eos))
+    }
+
+    fn start_encoding(&mut self, _item: Self::Item) -> bytecodec::Result<()> {
+        unreachable!()
+    }
+
+    fn is_idle(&self) -> bool {
+        self.inner.is_idle()
+    }
+
+    fn requiring_bytes(&self) -> ByteCount {
+        self.inner.requiring_bytes()
     }
 }
 
 #[cfg(test)]
 mod test {
-    use std::u64;
-
     use super::*;
 
     #[test]
-    fn message_message_id() {
-        let mut message_id = MessageId::new_client_side_id();
-        assert_eq!(message_id.as_u64(), 0);
+    fn message_id_next_works() {
+        let mut message_id = MessageId(0);
+        assert_eq!(message_id.0, 0);
 
         let prev = message_id.next();
-        assert_eq!(prev.as_u64(), 0);
-        assert_eq!(message_id.as_u64(), 1);
-    }
-
-    #[test]
-    fn message_id_overflow() {
-        // for client
-        let mut message_id = MessageId::from_u64((1 << 63) - 1);
-        assert_eq!(message_id.as_u64(), (1 << 63) - 1);
-
-        message_id.next();
-        assert_eq!(message_id.as_u64(), 0);
-
-        // for server
-        let mut message_id = MessageId::from_u64(u64::MAX);
-        assert_eq!(message_id.as_u64(), u64::MAX);
-
-        message_id.next();
-        assert_eq!(message_id.as_u64(), 1 << 63);
+        assert_eq!(prev.0, 0);
+        assert_eq!(message_id.0, 1);
     }
 }

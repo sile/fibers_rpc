@@ -226,8 +226,6 @@ impl ChannelsMetrics {
 #[derive(Debug, Clone)]
 pub struct ChannelMetrics {
     pub(crate) fiber_yielded: Counter,
-    pub(crate) encode_frame_failures: Counter,
-    pub(crate) decode_frame_failures: Counter,
     pub(crate) enqueued_outgoing_messages: Counter,
     pub(crate) dequeued_outgoing_messages: Counter,
 }
@@ -235,16 +233,6 @@ impl ChannelMetrics {
     /// Metric: `fibers_rpc_channel_fiber_yielded_total { role="server|client" } <COUNTER>`.
     pub fn fiber_yielded(&self) -> u64 {
         self.fiber_yielded.value() as u64
-    }
-
-    /// Metric: `fibers_rpc_channel_encode_frame_failures { role="server|client" } <COUNTER>`.
-    pub fn encode_frame_failures(&self) -> u64 {
-        self.encode_frame_failures.value() as u64
-    }
-
-    /// Metric: `fibers_rpc_channel_decode_frame_failures { role="server|client" } <COUNTER>`.
-    pub fn decode_frame_failures(&self) -> u64 {
-        self.decode_frame_failures.value() as u64
     }
 
     /// Metric: `fibers_rpc_channel_enqueued_outgoing_messages { role="server|client" } <COUNTER>`.
@@ -271,16 +259,6 @@ impl ChannelMetrics {
             fiber_yielded: builder
                 .counter("fiber_yielded_total")
                 .help("Number of `fibers::fiber::yield_poll()` function calls")
-                .finish()
-                .expect("Never fails"),
-            encode_frame_failures: builder
-                .counter("encode_frame_failures_total")
-                .help("Number of frame encoding failures")
-                .finish()
-                .expect("Never fails"),
-            decode_frame_failures: builder
-                .counter("decode_frame_failures_total")
-                .help("Number of frame decoding failures")
                 .finish()
                 .expect("Never fails"),
             enqueued_outgoing_messages: builder

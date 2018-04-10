@@ -5,10 +5,10 @@ use std::time::Duration;
 use bytecodec::Encode;
 use trackable::error::ErrorKindExt;
 
-use {Call, Cast, ErrorKind};
+use {Call, Cast, ErrorKind, Result};
 use client_service::{ClientServiceHandle, Message};
 use client_side_handlers::{Response, ResponseHandler};
-use message::OutgoingMessage;
+use message::{MessageHeader, MessageId, OutgoingMessage, OutgoingMessagePayload};
 use metrics::ClientMetrics;
 
 /// Client for notification RPC.
@@ -33,29 +33,37 @@ where
     }
 
     /// Sends the notification message to the RPC server.
-    ///
-    /// If the message is discarded before sending, this method will return `false`.
-    pub fn cast(mut self, server: SocketAddr, notification: T::Notification) -> bool {
+    pub fn cast(mut self, server: SocketAddr, notification: T::Notification) -> Result<()> {
         if !self.options
             .is_allowable_queue_len(&self.service.metrics, server)
         {
             self.service.metrics.discarded_outgoing_messages.increment();
-            return false;
+            let e = track!(ErrorKind::Unavailable.cause("too long transmit queue"));
+            return Err(e.into());
         }
 
-        self.encoder.start_encoding(notification).expect("TODO");
+        track!(self.encoder.start_encoding(notification))?;
+        let header = MessageHeader {
+            id: MessageId(0), // dummy
+            procedure: T::ID,
+            priority: self.options.priority,
+        };
         let message = Message {
-            message: OutgoingMessage::new(Some(T::ID), self.options.priority, self.encoder),
+            message: OutgoingMessage {
+                header,
+                payload: OutgoingMessagePayload::new(self.encoder),
+            },
             response_handler: None,
             force_wakeup: self.options.force_wakeup,
         };
         if !self.service.send_message(server, message) {
             self.service.metrics.discarded_outgoing_messages.increment();
-            return false;
+            let e = track!(ErrorKind::Unavailable.cause("client service or server is unavailable"));
+            return Err(e.into());
         }
 
         self.service.metrics.notifications.increment();
-        true
+        Ok(())
     }
 }
 impl<'a, T: Cast> CastClient<'a, T> {
@@ -114,6 +122,10 @@ impl<'a, T: Call> CallClient<'a, T> {
             let e = track!(ErrorKind::Unavailable.cause("too long transmit queue"));
             return Response::error(e.into());
         }
+        if let Err(e) = track!(self.encoder.start_encoding(request)) {
+            self.service.metrics.error_responses.increment();
+            return Response::error(e.into());
+        }
 
         let (handler, response) = ResponseHandler::new(
             self.decoder,
@@ -121,9 +133,16 @@ impl<'a, T: Call> CallClient<'a, T> {
             Arc::clone(&self.service.metrics),
         );
 
-        self.encoder.start_encoding(request).expect("TODO");
+        let header = MessageHeader {
+            id: MessageId(0), // dummy
+            procedure: T::ID,
+            priority: self.options.priority,
+        };
         let message = Message {
-            message: OutgoingMessage::new(Some(T::ID), self.options.priority, self.encoder),
+            message: OutgoingMessage {
+                header,
+                payload: OutgoingMessagePayload::new(self.encoder),
+            },
             response_handler: Some(Box::new(handler)),
             force_wakeup: self.options.force_wakeup,
         };

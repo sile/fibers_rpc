@@ -18,8 +18,11 @@ impl From<std::io::Error> for Error {
 }
 impl From<bytecodec::Error> for Error {
     fn from(f: bytecodec::Error) -> Self {
-        // TODO: handle kind
-        ErrorKind::Other.takes_over(f).into()
+        let kind = match *f.kind() {
+            bytecodec::ErrorKind::InvalidInput => ErrorKind::InvalidInput,
+            _ => ErrorKind::Other,
+        };
+        kind.takes_over(f).into()
     }
 }
 

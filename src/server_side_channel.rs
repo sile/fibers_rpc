@@ -4,8 +4,8 @@ use futures::{Async, Poll, Stream};
 use slog::Logger;
 
 use Error;
-use message::{MessageId, OutgoingMessage};
-use message_stream::{MessageStream, MessageStreamEvent};
+use message::OutgoingMessage;
+use message_stream::{MessageEvent, MessageStream};
 use metrics::ChannelMetrics;
 use server_side_handlers::{Action, Assigner};
 
@@ -28,8 +28,8 @@ impl ServerSideChannel {
         }
     }
 
-    pub fn reply(&mut self, message_id: MessageId, message: OutgoingMessage) {
-        self.message_stream.send_message(message_id, message);
+    pub fn reply(&mut self, message: OutgoingMessage) {
+        self.message_stream.send_message(message);
     }
 }
 impl Stream for ServerSideChannel {
@@ -41,41 +41,18 @@ impl Stream for ServerSideChannel {
         while let Async::Ready(item) = track!(self.message_stream.poll())? {
             if let Some(event) = item {
                 match event {
-                    MessageStreamEvent::Sent { message_id, result } => {
-                        if let Err(e) = result {
-                            error!(
-                                self.logger,
-                                "Failed to send message({:?}): {}", message_id, e
-                            );
-                        } else {
-                            debug!(self.logger, "Completed to send message({:?})", message_id);
-                        }
+                    MessageEvent::Sent => {
+                        debug!(self.logger, "Completed to send a message");
                     }
-                    MessageStreamEvent::Received { message_id, result } => match result {
-                        Err(e) => {
-                            error!(
-                                self.logger,
-                                "Failed to receive message({:?}): {}", message_id, e
-                            );
-                            self.message_stream.send_error_frame(message_id);
-                            // TODO
-                            // self.message_stream
-                            //     .incoming_frame_handler_mut()
-                            //     .handle_error(message_id, e);
-                        }
-                        Ok(action) => {
-                            debug!(
-                                self.logger,
-                                "Completed to receive message({:?})", message_id
-                            );
-                            return Ok(Async::Ready(Some(action)));
-                        }
-                    },
+                    MessageEvent::Received { next_action } => {
+                        debug!(self.logger, "Completed to receive a message");
+                        return Ok(Async::Ready(Some(next_action)));
+                    }
                 }
 
                 // FIXME: parameterize
                 count += 1;
-                if count > 64 {
+                if count > 128 {
                     self.message_stream.metrics().fiber_yielded.increment();
                     return fibers::fiber::yield_poll();
                 }

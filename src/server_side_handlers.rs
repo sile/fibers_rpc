@@ -2,13 +2,14 @@ use std::collections::HashMap;
 use std::fmt;
 use std::marker::PhantomData;
 use std::sync::Arc;
-use bytecodec::{Decode, Encode, Eos};
+use bytecodec::{self, ByteCount, Decode, Eos};
+use bytecodec::marker::Never;
 use factory::Factory;
 use futures::{Async, Future, Poll};
 use futures::future::Either;
 
 use {Call, Cast, ErrorKind, ProcedureId, Result};
-use message::{AssignIncomingMessageHandler, MessageHeader, MessageId, OutgoingMessage};
+use message::{AssignIncomingMessageHandler, MessageHeader, OutgoingMessage, OutgoingMessagePayload};
 use metrics::HandlerMetrics;
 
 pub type MessageHandlers = HashMap<ProcedureId, Box<MessageHandlerFactory>>;
@@ -24,9 +25,6 @@ pub trait HandleCall<T: Call>: Send + Sync + 'static {
     /// Handles a request.
     fn handle_call(&self, request: T::Req) -> Reply<T>;
 }
-
-/// A marker which represents never instantiated type.
-pub struct Never(());
 
 type BoxResponseFuture<T> = Box<Future<Item = T, Error = Never> + Send + 'static>;
 
@@ -53,17 +51,15 @@ impl<T: Call> Reply<T> {
         }
     }
 
-    fn boxed<F>(self, message_id: MessageId, f: F) -> BoxReply
+    fn boxed<F>(self, f: F) -> BoxReply
     where
         F: FnOnce(T::Res) -> OutgoingMessage + Send + 'static,
     {
         match self.either {
             Either::A(v) => BoxReply {
-                message_id,
                 either: Either::A(Box::new(v.map(f))),
             },
             Either::B(v) => BoxReply {
-                message_id,
                 either: Either::B(v.map(f)),
             },
         }
@@ -76,39 +72,34 @@ impl<T: Call> fmt::Debug for Reply<T> {
 }
 
 pub struct BoxReply {
-    message_id: MessageId,
     either: Either<
         Box<Future<Item = OutgoingMessage, Error = Never> + Send + 'static>,
         Option<OutgoingMessage>,
     >,
 }
 impl BoxReply {
-    pub fn try_take(&mut self) -> Option<(MessageId, OutgoingMessage)> {
-        let message_id = self.message_id;
+    pub fn try_take(&mut self) -> Option<OutgoingMessage> {
         if let Either::B(ref mut v) = self.either {
-            v.take().map(|v| (message_id, v))
+            v.take().map(|v| v)
         } else {
             None
         }
     }
 }
 impl Future for BoxReply {
-    type Item = (MessageId, OutgoingMessage);
+    type Item = OutgoingMessage;
     type Error = Never;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        let message_id = self.message_id;
         Ok(match self.either {
-            Either::A(ref mut f) => f.poll()?.map(|v| (message_id, v)),
-            Either::B(ref mut v) => {
-                Async::Ready((message_id, v.take().expect("Cannot poll BoxReply twice")))
-            }
+            Either::A(ref mut f) => f.poll()?.map(|v| v),
+            Either::B(ref mut v) => Async::Ready(v.take().expect("Cannot poll BoxReply twice")),
         })
     }
 }
 impl fmt::Debug for BoxReply {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "BoxReply {{ message_id: {:?}, .. }}", self.message_id)
+        write!(f, "BoxReply {{ .. }}")
     }
 }
 
@@ -156,89 +147,47 @@ pub enum Action {
 
 pub struct Assigner {
     handlers: Arc<MessageHandlers>,
-    runnings: HashMap<MessageId, Box<HandleMessage>>,
 }
 impl Assigner {
     pub fn new(mut handlers: MessageHandlers) -> Self {
         handlers.shrink_to_fit();
         Assigner {
             handlers: Arc::new(handlers),
-            runnings: HashMap::new(),
         }
     }
 }
 impl AssignIncomingMessageHandler for Assigner {
     type Handler = Box<Decode<Item = Action> + Send + 'static>;
 
-    fn assign_incoming_message_handler(&self, header: &MessageHeader) -> Result<Self::Handler> {
-        unimplemented!()
+    fn assign_incoming_message_handler(&mut self, header: &MessageHeader) -> Result<Self::Handler> {
+        let factory = track_assert_some!(
+            self.handlers.get(&header.procedure),
+            ErrorKind::InvalidInput,
+            "Unregistered RPC: {:?}",
+            header.procedure,
+        );
+        let handler = factory.create_message_handler(header);
+        Ok(handler)
     }
-
-    // TODO: delete
-    // #[cfg_attr(feature = "cargo-clippy", allow(map_entry))]
-    // fn handle_frame(&mut self, frame: &Frame) -> Result<Option<Self::Item>> {
-    //     debug_assert!(!frame.is_error());
-
-    //     let mut offset = 0;
-    //     if !self.runnings.contains_key(&frame.message_id()) {
-    //         debug_assert!(frame.data().len() >= 4);
-    //         let procedure = ProcedureId(BigEndian::read_u32(frame.data()));
-    //         offset = 4;
-
-    //         let factory = track_assert_some!(
-    //             self.handlers.get(&procedure),
-    //             ErrorKind::InvalidInput,
-    //             "Unregistered RPC: {:?}",
-    //             procedure,
-    //         );
-    //         let handler = factory.create_message_handler(frame.message_id());
-    //         self.runnings.insert(frame.message_id(), handler);
-    //     }
-
-    //     let mut handler = self.runnings
-    //         .remove(&frame.message_id())
-    //         .expect("Never fails");
-    //     track!(handler.handle_message(&frame.data()[offset..], frame.is_end_of_message()))?;
-    //     if frame.is_end_of_message() {
-    //         let action = track!(handler.finish(frame.priority()))?;
-    //         Ok(Some(action))
-    //     } else {
-    //         self.runnings.insert(frame.message_id(), handler);
-    //         Ok(None)
-    //     }
-    // }
-
-    // fn handle_error(&mut self, message_id: MessageId, _error: Error) {
-    //     self.runnings.remove(&message_id);
-    // }
 }
 impl fmt::Debug for Assigner {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "Assigner {{ handlers.len: {}, runnings.len: {} }}",
-            self.handlers.len(),
-            self.runnings.len()
-        )
+        write!(f, "Assigner {{ handlers.len: {} }}", self.handlers.len(),)
     }
 }
 impl Clone for Assigner {
     fn clone(&self) -> Self {
         Assigner {
             handlers: Arc::clone(&self.handlers),
-            runnings: HashMap::new(),
         }
     }
 }
 
 pub trait MessageHandlerFactory: Send + Sync + 'static {
-    fn create_message_handler(&self, message_id: MessageId) -> Box<HandleMessage>;
-}
-
-// TODO:
-pub trait HandleMessage: Send + 'static {
-    fn handle_message(&mut self, data: &[u8], eos: bool) -> Result<()>;
-    fn finish(&mut self, priority: u8) -> Result<Action>;
+    fn create_message_handler(
+        &self,
+        header: &MessageHeader,
+    ) -> Box<Decode<Item = Action> + Send + 'static>;
 }
 
 pub struct CastHandlerFactory<T, H, D> {
@@ -265,17 +214,18 @@ where
 impl<T, H, D> MessageHandlerFactory for CastHandlerFactory<T, H, D>
 where
     T: Cast,
-    T::Notification: Send, // TODO: delete
     H: HandleCast<T>,
     D: Factory<Item = T::Decoder> + Send + Sync + 'static,
 {
-    fn create_message_handler(&self, _message_id: MessageId) -> Box<HandleMessage> {
+    fn create_message_handler(
+        &self,
+        _header: &MessageHeader,
+    ) -> Box<Decode<Item = Action> + Send + 'static> {
         let decoder = self.decoder_maker.create();
         let handler = CastHandler {
             _rpc: PhantomData,
             handler: Arc::clone(&self.handler),
             decoder,
-            notification: None,
         };
         self.metrics.rpc_count.increment();
         Box::new(handler)
@@ -286,27 +236,30 @@ struct CastHandler<T: Cast, H, D> {
     _rpc: PhantomData<T>,
     handler: Arc<H>,
     decoder: D,
-    notification: Option<T::Notification>,
 }
-impl<T, H> HandleMessage for CastHandler<T, H, T::Decoder>
+impl<T, H> Decode for CastHandler<T, H, T::Decoder>
 where
     T: Cast,
-    T::Notification: Send, // TODO: delete
     H: HandleCast<T>,
 {
-    fn handle_message(&mut self, data: &[u8], eos: bool) -> Result<()> {
-        let eos = Eos::new(eos);
-        let (_size, item) = track!(self.decoder.decode(data, eos))?;
+    type Item = Action;
+
+    fn decode(&mut self, buf: &[u8], eos: Eos) -> bytecodec::Result<(usize, Option<Self::Item>)> {
+        let (size, item) = track!(self.decoder.decode(buf, eos))?;
         if let Some(notification) = item {
-            // TODO: validate eos and _size
-            self.notification = Some(notification);
+            let noreply = self.handler.handle_cast(notification);
+            Ok((size, Some(Action::NoReply(noreply))))
+        } else {
+            Ok((size, None))
         }
-        Ok(())
     }
-    fn finish(&mut self, _priority: u8) -> Result<Action> {
-        let notification = track_assert_some!(self.notification.take(), ErrorKind::Other);
-        let noreply = self.handler.handle_cast(notification);
-        Ok(Action::NoReply(noreply))
+
+    fn has_terminated(&self) -> bool {
+        self.decoder.has_terminated()
+    }
+
+    fn requiring_bytes(&self) -> ByteCount {
+        self.decoder.requiring_bytes()
     }
 }
 
@@ -337,20 +290,21 @@ where
 impl<T, H, D, E> MessageHandlerFactory for CallHandlerFactory<T, H, D, E>
 where
     T: Call,
-    T::Req: Send, // TODO: delete
     H: HandleCall<T>,
     D: Factory<Item = T::ReqDecoder> + Send + Sync + 'static,
     E: Factory<Item = T::ResEncoder> + Send + Sync + 'static,
 {
-    fn create_message_handler(&self, message_id: MessageId) -> Box<HandleMessage> {
+    fn create_message_handler(
+        &self,
+        header: &MessageHeader,
+    ) -> Box<Decode<Item = Action> + Send + 'static> {
         let decoder = self.decoder_maker.create();
         let handler = CallHandler {
             _rpc: PhantomData,
             handler: Arc::clone(&self.handler),
             decoder,
-            encoder_maker: Arc::clone(&self.encoder_maker),
-            message_id,
-            request: None,
+            encoder: Some(self.encoder_maker.create()),
+            header: header.clone(),
         };
         self.metrics.rpc_count.increment();
         Box::new(handler)
@@ -361,36 +315,42 @@ struct CallHandler<T: Call, H, D, E> {
     _rpc: PhantomData<T>,
     handler: Arc<H>,
     decoder: D,
-    encoder_maker: Arc<E>, // TODO: s/encoder_maker/encoder/
-    message_id: MessageId,
-    request: Option<T::Req>,
+    encoder: Option<E>,
+    header: MessageHeader,
 }
-impl<T, H, E> HandleMessage for CallHandler<T, H, T::ReqDecoder, E>
+impl<T, H> Decode for CallHandler<T, H, T::ReqDecoder, T::ResEncoder>
 where
     T: Call,
-    T::Req: Send, // TODO: delete
     H: HandleCall<T>,
-    E: Factory<Item = T::ResEncoder> + Send + Sync + 'static,
 {
-    fn handle_message(&mut self, data: &[u8], eos: bool) -> Result<()> {
-        let eos = Eos::new(eos);
-        let (_size, item) = track!(self.decoder.decode(data, eos))?;
+    type Item = Action;
+
+    fn decode(&mut self, buf: &[u8], eos: Eos) -> bytecodec::Result<(usize, Option<Self::Item>)> {
+        let (size, item) = track!(self.decoder.decode(buf, eos))?;
         if let Some(request) = item {
-            // TODO: validate eos and _size
-            self.request = Some(request);
+            let encoder = track_assert_some!(self.encoder.take(), bytecodec::ErrorKind::Other);
+            let header = self.header.clone();
+            let reply = self.handler
+                .handle_call(request)
+                .boxed(move |v| OutgoingMessage {
+                    header,
+                    payload: OutgoingMessagePayload::with_item(encoder, v),
+                });
+            Ok((size, Some(Action::Reply(reply))))
+        } else {
+            Ok((size, None))
         }
-        Ok(())
     }
-    fn finish(&mut self, priority: u8) -> Result<Action> {
-        let request = track_assert_some!(self.request.take(), ErrorKind::Other);
-        let encoder_maker = Arc::clone(&self.encoder_maker);
-        let reply = self.handler
-            .handle_call(request)
-            .boxed(self.message_id, move |v| {
-                let mut encoder = encoder_maker.create();
-                encoder.start_encoding(v).expect("TODO");
-                OutgoingMessage::new(None, priority, encoder)
-            });
-        Ok(Action::Reply(reply))
+
+    fn has_terminated(&self) -> bool {
+        self.decoder.has_terminated() || self.encoder.is_none()
+    }
+
+    fn requiring_bytes(&self) -> ByteCount {
+        if self.encoder.is_none() {
+            ByteCount::Finite(0)
+        } else {
+            self.decoder.requiring_bytes()
+        }
     }
 }

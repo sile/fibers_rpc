@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
-use bytecodec::Decode;
+use bytecodec::{self, ByteCount, Decode, Eos};
 use fibers::sync::oneshot;
 use fibers::time::timer::{self, Timeout};
 use futures::{Async, Future, Poll};
@@ -74,8 +74,13 @@ impl Assigner {
 impl AssignIncomingMessageHandler for Assigner {
     type Handler = BoxResponseHandler;
 
-    fn assign_incoming_message_handler(&self, header: &MessageHeader) -> Result<Self::Handler> {
-        let handler = track_assert_some!(self.handlers.remove(&header.id), ErrorKind::InvalidInput);
+    fn assign_incoming_message_handler(&mut self, header: &MessageHeader) -> Result<Self::Handler> {
+        let handler = track_assert_some!(
+            self.handlers.remove(&header.id),
+            ErrorKind::InvalidInput,
+            "header={:?}",
+            header
+        );
         Ok(handler)
     }
 }
@@ -85,7 +90,11 @@ impl fmt::Debug for Assigner {
     }
 }
 
-pub type BoxResponseHandler = Box<Decode<Item = ()> + Send + 'static>;
+pub type BoxResponseHandler = Box<HandleResponse<Item = ()> + Send + 'static>;
+
+pub trait HandleResponse: Decode<Item = ()> {
+    fn handle_error(&mut self, error: Error);
+}
 
 #[derive(Debug)]
 pub struct ResponseHandler<D: Decode> {
@@ -111,25 +120,33 @@ impl<D: Decode> ResponseHandler<D> {
         (handler, response)
     }
 }
-// TODO:
-// impl<D: Decode> HandleFrame for ResponseHandler<D> {
-//     type Item = ();
-//     fn handle_frame(&mut self, frame: &Frame) -> Result<Option<Self::Item>> {
-//         let eos = Eos::new(frame.is_end_of_message());
-//         let (_size, item) = track!(self.decoder.decode(frame.data(), eos))?;
-//         if let Some(response) = item {
-//             // TODO: validate `_size`
-//             let reply_tx = self.reply_tx.take().expect("Never fails");
-//             reply_tx.exit(Ok(response));
-//             self.metrics.ok_responses.increment();
-//             Ok(Some(()))
-//         } else {
-//             Ok(None)
-//         }
-//     }
-//     fn handle_error(&mut self, _message_id: MessageId, error: Error) {
-//         let reply_tx = self.reply_tx.take().expect("Never fails");
-//         reply_tx.exit(Err(error));
-//         self.metrics.error_responses.increment();
-//     }
-// }
+impl<D: Decode> Decode for ResponseHandler<D> {
+    type Item = ();
+
+    fn decode(&mut self, buf: &[u8], eos: Eos) -> bytecodec::Result<(usize, Option<Self::Item>)> {
+        let (size, item) = track!(self.decoder.decode(buf, eos))?;
+        if let Some(response) = item {
+            let reply_tx = self.reply_tx.take().expect("Never fails");
+            reply_tx.exit(Ok(response));
+            self.metrics.ok_responses.increment();
+            Ok((size, Some(())))
+        } else {
+            Ok((size, None))
+        }
+    }
+
+    fn has_terminated(&self) -> bool {
+        self.decoder.has_terminated()
+    }
+
+    fn requiring_bytes(&self) -> ByteCount {
+        self.decoder.requiring_bytes()
+    }
+}
+impl<D: Decode> HandleResponse for ResponseHandler<D> {
+    fn handle_error(&mut self, error: Error) {
+        let reply_tx = self.reply_tx.take().expect("Never fails");
+        reply_tx.exit(Err(error));
+        self.metrics.error_responses.increment();
+    }
+}

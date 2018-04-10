@@ -13,12 +13,12 @@ use trackable::error::ErrorKindExt;
 use {Error, ErrorKind, Result};
 use client_side_handlers::{Assigner, BoxResponseHandler};
 use message::{MessageId, OutgoingMessage};
-use message_stream::{MessageStream, MessageStreamEvent};
+use message_stream::MessageStream;
 use metrics::{ChannelMetrics, ClientMetrics};
 
 pub const DEFAULT_KEEP_ALIVE_TIMEOUT_SECS: u64 = 60 * 10;
 
-// TODO: #[derive(Debug)]
+#[derive(Debug)]
 pub struct ClientSideChannel {
     logger: Logger,
     server: SocketAddr,
@@ -34,7 +34,7 @@ impl ClientSideChannel {
             logger,
             server,
             keep_alive: KeepAlive::new(Duration::from_secs(DEFAULT_KEEP_ALIVE_TIMEOUT_SECS)),
-            next_message_id: MessageId::new_client_side_id(),
+            next_message_id: MessageId(0),
             message_stream: MessageStreamState::new(server),
             exponential_backoff: ExponentialBackoff::new(),
             metrics,
@@ -47,12 +47,11 @@ impl ClientSideChannel {
 
     pub fn send_message(
         &mut self,
-        message: OutgoingMessage,
+        mut message: OutgoingMessage,
         response_handler: Option<BoxResponseHandler>,
     ) {
-        let message_id = self.next_message_id.next();
-        self.message_stream
-            .send_message(message_id, message, response_handler);
+        message.header.id = self.next_message_id.next();
+        self.message_stream.send_message(message, response_handler);
     }
 
     pub fn force_wakeup(&mut self) {
@@ -134,7 +133,7 @@ impl ClientSideChannel {
                     );
                     let mut connected = MessageStreamState::Connected { stream };
                     for m in buffer.drain(..) {
-                        connected.send_message(m.message_id, m.message, m.handler);
+                        connected.send_message(m.message, m.handler);
                     }
                     Ok(Async::Ready(Some(connected)))
                 }
@@ -159,37 +158,9 @@ impl ClientSideChannel {
                     );
                     Ok(Async::Ready(Some(next)))
                 }
-                Ok(Async::Ready(Some(event))) => {
-                    if event.is_ok() {
-                        self.exponential_backoff.reset();
-                        self.keep_alive.extend_period();
-                    }
-                    match event {
-                        MessageStreamEvent::Sent {
-                            message_id,
-                            result: Err(e),
-                        } => {
-                            error!(self.logger, "Cannot send message({:?}): {}", message_id, e);
-                            // TODO
-                            // stream
-                            //     .incoming_frame_handler_mut()
-                            //     .handle_error(message_id, e);
-                        }
-                        MessageStreamEvent::Received {
-                            message_id,
-                            result: Err(e),
-                        } => {
-                            error!(
-                                self.logger,
-                                "Cannot receive message({:?}): {}", message_id, e
-                            );
-                            // TODO
-                            // stream
-                            //     .incoming_frame_handler_mut()
-                            //     .handle_error(message_id, e);
-                        }
-                        _ => {}
-                    }
+                Ok(Async::Ready(Some(_event))) => {
+                    self.exponential_backoff.reset();
+                    self.keep_alive.extend_period();
                     Ok(Async::Ready(None))
                 }
             },
@@ -213,7 +184,7 @@ impl Future for ClientSideChannel {
 
             // FIXME: parameterize
             count += 1;
-            if count > 64 {
+            if count > 128 {
                 self.message_stream
                     .metrics()
                     .map(|m| m.fiber_yielded.increment());
@@ -230,7 +201,7 @@ impl Drop for ClientSideChannel {
 }
 
 #[cfg_attr(feature = "cargo-clippy", allow(large_enum_variant))]
-// TODO: #[derive(Debug)]
+#[derive(Debug)]
 enum MessageStreamState {
     Wait {
         timeout: Timeout,
@@ -258,30 +229,21 @@ impl MessageStreamState {
         }
     }
 
-    fn send_message(
-        &mut self,
-        message_id: MessageId,
-        message: OutgoingMessage,
-        handler: Option<BoxResponseHandler>,
-    ) {
+    fn send_message(&mut self, message: OutgoingMessage, handler: Option<BoxResponseHandler>) {
         match *self {
             MessageStreamState::Wait { .. } => {
                 if let Some(mut handler) = handler {
                     let e = ErrorKind::Unavailable
                         .cause("TCP stream disconnected (waiting for reconnecting)");
-                    // TODO:
-                    // handler.handle_error(message_id, track!(e).into());
+                    handler.handle_error(track!(e).into());
                 }
             }
             MessageStreamState::Connecting { ref mut buffer, .. } => {
-                buffer.push(BufferedMessage {
-                    message_id,
-                    message,
-                    handler,
-                });
+                buffer.push(BufferedMessage { message, handler });
             }
             MessageStreamState::Connected { ref mut stream } => {
-                stream.send_message(message_id, message);
+                let message_id = message.header.id;
+                stream.send_message(message);
                 if let Some(handler) = handler {
                     stream
                         .assigner_mut()
@@ -293,7 +255,6 @@ impl MessageStreamState {
 }
 
 struct BufferedMessage {
-    message_id: MessageId,
     message: OutgoingMessage,
     handler: Option<BoxResponseHandler>,
 }
@@ -301,8 +262,9 @@ impl fmt::Debug for BufferedMessage {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "BufferedMessage {{ message_id: {:?}, .. }}",
-            self.message_id
+            "BufferedMessage {{ messag: {:?}, handler.is_some(): {} }}",
+            self.message,
+            self.handler.is_some()
         )
     }
 }
