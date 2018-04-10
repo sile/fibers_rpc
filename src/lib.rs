@@ -47,7 +47,7 @@
 //! }
 //! let server_addr = "127.0.0.1:1919".parse().unwrap();
 //! let server = ServerBuilder::new(server_addr)
-//!     .call_handler(EchoHandler)
+//!     .add_call_handler(EchoHandler)
 //!     .finish(executor.handle());
 //! executor.spawn(server.map_err(|e| panic!("{}", e)));
 //!
