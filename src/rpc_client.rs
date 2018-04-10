@@ -131,6 +131,7 @@ impl<'a, T: Call> CallClient<'a, T> {
             self.decoder,
             self.options.timeout,
             Arc::clone(&self.service.metrics),
+            T::NAME,
         );
 
         let header = MessageHeader {

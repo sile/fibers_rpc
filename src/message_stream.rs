@@ -123,7 +123,7 @@ impl<A: AssignIncomingMessageHandler> MessageStream<A> {
 
                 let mut item = track!(handler.decode_from_read_buf(&mut self.rbuf))?;
                 if item.is_none() && handler.is_suspended() && header.is_end_of_message() {
-                    item = track!(handler.decode(&[][..], Eos::new(true)))?.1;
+                    item = track!(handler.decode(&[][..], Eos::new(true)); header)?.1;
                 }
                 if handler.is_suspended() {
                     self.packet_header_decoder.take_item();

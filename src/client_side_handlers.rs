@@ -101,18 +101,21 @@ pub struct ResponseHandler<D: Decode> {
     decoder: D,
     reply_tx: Option<oneshot::Monitored<D::Item, Error>>,
     metrics: Arc<ClientMetrics>,
+    rpc_name: &'static str,
 }
 impl<D: Decode> ResponseHandler<D> {
     pub fn new(
         decoder: D,
         timeout: Option<Duration>,
         metrics: Arc<ClientMetrics>,
+        rpc_name: &'static str,
     ) -> (Self, Response<D::Item>) {
         let (reply_tx, reply_rx) = oneshot::monitor();
         let handler = ResponseHandler {
             decoder: decoder,
             reply_tx: Some(reply_tx),
             metrics,
+            rpc_name,
         };
 
         let timeout = timeout.map(timer::timeout);
@@ -124,7 +127,7 @@ impl<D: Decode> Decode for ResponseHandler<D> {
     type Item = ();
 
     fn decode(&mut self, buf: &[u8], eos: Eos) -> bytecodec::Result<(usize, Option<Self::Item>)> {
-        let (size, item) = track!(self.decoder.decode(buf, eos))?;
+        let (size, item) = track!(self.decoder.decode(buf, eos); self.rpc_name)?;
         if let Some(response) = item {
             let reply_tx = self.reply_tx.take().expect("Never fails");
             reply_tx.exit(Ok(response));
