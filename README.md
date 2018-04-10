@@ -69,7 +69,7 @@ assert_eq!(result.ok(), Some(request));
 
 Informal benchmark result (v0.2.1):
 
-```consule
+```console
 $ uname -a
 Linux DESKTOP 4.4.0-43-Microsoft #1-Microsoft Wed Dec 31 14:42:53 PST 2014 x86_64 x86_64 x86_64 GNU/Linux
 
