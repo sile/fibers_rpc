@@ -17,7 +17,7 @@ Features
 ---------
 
 - Asynchronous RPC server/client using [fibers] crate
-- Support two type RPC:
+- Support two type of RPC:
   - Request/response model
   - Notification model
 - Strongly typed RPC using [bytecodec] crate

@@ -107,11 +107,13 @@ impl ServerBuilder {
 
     /// Registers a handler (with the given encoder maker) for the request/response RPC.
     ///
-    /// This equivalent to `add_call_handler_with_codec(handler, DefaultFactory::new(), encoder_factory)`.
+    /// This equivalent to
+    /// `add_call_handler_with_codec(handler, DefaultFactory::new(), encoder_factory)`.
     ///
     /// # Panices
     ///
-    /// If a procedure which has `T::ID` already have been registered, the calling thread will panic.
+    /// If a procedure which has `T::ID` already have been registered,
+    /// the calling thread will panic.
     pub fn add_call_handler_with_encoder<T, H, E>(
         &mut self,
         handler: H,
