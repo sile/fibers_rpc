@@ -4,6 +4,7 @@ use futures::{Async, Poll, Stream};
 use slog::Logger;
 
 use Error;
+use channel::ChannelOptions;
 use message::OutgoingMessage;
 use message_stream::{MessageEvent, MessageStream};
 use metrics::ChannelMetrics;
@@ -19,9 +20,10 @@ impl ServerSideChannel {
         logger: Logger,
         transport_stream: TcpStream,
         assigner: Assigner,
+        options: ChannelOptions,
         metrics: ChannelMetrics,
     ) -> Self {
-        let message_stream = MessageStream::new(transport_stream, assigner, metrics);
+        let message_stream = MessageStream::new(transport_stream, assigner, options, metrics);
         ServerSideChannel {
             logger,
             message_stream,
@@ -50,9 +52,8 @@ impl Stream for ServerSideChannel {
                     }
                 }
 
-                // FIXME: parameterize
                 count += 1;
-                if count > 128 {
+                if count > self.message_stream.options().yield_threshold {
                     self.message_stream.metrics().fiber_yielded.increment();
                     return fibers::fiber::yield_poll();
                 }

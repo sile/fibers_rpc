@@ -8,12 +8,10 @@ use fibers::net::TcpStream;
 use futures::{Async, Poll, Stream};
 
 use {Error, ErrorKind, Result};
+use channel::ChannelOptions;
 use message::{AssignIncomingMessageHandler, MessageId, OutgoingMessage};
 use metrics::ChannelMetrics;
-use packet::{PacketHeaderDecoder, PacketizedMessage, MAX_PACKET_LEN, MIN_PACKET_LEN};
-
-// FIXME: parameterize
-const BUF_SIZE: usize = MAX_PACKET_LEN * 2;
+use packet::{PacketHeaderDecoder, PacketizedMessage, MIN_PACKET_LEN};
 
 pub struct MessageStream<A: AssignIncomingMessageHandler> {
     transport_stream: TcpStream,
@@ -24,22 +22,33 @@ pub struct MessageStream<A: AssignIncomingMessageHandler> {
     receiving_messages: HashMap<MessageId, Slice<A::Handler>>,
     sending_messages: BinaryHeap<SendingMessage>,
     seqno: u64,
+    options: ChannelOptions,
     metrics: ChannelMetrics,
 }
 impl<A: AssignIncomingMessageHandler> MessageStream<A> {
-    pub fn new(transport_stream: TcpStream, assigner: A, metrics: ChannelMetrics) -> Self {
+    pub fn new(
+        transport_stream: TcpStream,
+        assigner: A,
+        options: ChannelOptions,
+        metrics: ChannelMetrics,
+    ) -> Self {
         let _ = unsafe { transport_stream.with_inner(|s| s.set_nodelay(true)) };
         MessageStream {
             transport_stream,
-            rbuf: ReadBuf::new(vec![0; BUF_SIZE]),
-            wbuf: WriteBuf::new(vec![0; BUF_SIZE]),
+            rbuf: ReadBuf::new(vec![0; options.read_buffer_size]),
+            wbuf: WriteBuf::new(vec![0; options.write_buffer_size]),
             sending_messages: BinaryHeap::new(),
             assigner,
             packet_header_decoder: PacketHeaderDecoder::default().buffered(),
             receiving_messages: HashMap::new(),
             seqno: 0,
+            options,
             metrics,
         }
+    }
+
+    pub fn options(&self) -> &ChannelOptions {
+        &self.options
     }
 
     pub fn metrics(&self) -> &ChannelMetrics {
@@ -159,9 +168,8 @@ impl<A: AssignIncomingMessageHandler> Stream for MessageStream<A> {
             return Ok(Async::Ready(Some(event)));
         }
 
-        // FIXME: parameterize
         track_assert!(
-            self.sending_messages.len() <= 10_000,
+            self.sending_messages.len() <= self.options.max_transmit_queue_len,
             ErrorKind::Other,
             "This stream may be overloaded"
         );

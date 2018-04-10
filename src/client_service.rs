@@ -11,6 +11,7 @@ use futures::{Async, Future, Poll, Stream};
 use prometrics::metrics::MetricBuilder;
 
 use Error;
+use channel::ChannelOptions;
 use client_side_channel::{ClientSideChannel, DEFAULT_KEEP_ALIVE_TIMEOUT_SECS};
 use client_side_handlers::BoxResponseHandler;
 use message::OutgoingMessage;
@@ -21,6 +22,7 @@ use metrics::ClientMetrics;
 pub struct ClientServiceBuilder {
     logger: Logger,
     keep_alive_timeout: Duration,
+    channel_options: ChannelOptions,
     metrics: MetricBuilder,
 }
 impl ClientServiceBuilder {
@@ -29,6 +31,7 @@ impl ClientServiceBuilder {
         ClientServiceBuilder {
             logger: Logger::root(Discard, o!()),
             keep_alive_timeout: Duration::from_secs(DEFAULT_KEEP_ALIVE_TIMEOUT_SECS),
+            channel_options: ChannelOptions::default(),
             metrics: MetricBuilder::new(),
         }
     }
@@ -49,6 +52,14 @@ impl ClientServiceBuilder {
     /// The default value is `Duration::from_secs(60 * 10)`.
     pub fn keep_alive_timeout(&mut self, timeout: Duration) -> &mut Self {
         self.keep_alive_timeout = timeout;
+        self
+    }
+
+    /// Sets `ChannelOptions` used by the service.
+    ///
+    /// The default value is `ChannelOptions::default()`.
+    pub fn channel_options(&mut self, options: ChannelOptions) -> &mut Self {
+        self.channel_options = options;
         self
     }
 
@@ -75,6 +86,7 @@ impl ClientServiceBuilder {
             command_tx,
             channels: channels.clone(),
             keep_alive_timeout: self.keep_alive_timeout,
+            channel_options: self.channel_options.clone(),
             metrics,
         }
     }
@@ -97,6 +109,7 @@ pub struct ClientService {
     command_tx: mpsc::Sender<Command>,
     channels: Arc<AtomicImmut<HashMap<SocketAddr, ChannelHandle>>>,
     keep_alive_timeout: Duration,
+    channel_options: ChannelOptions,
     metrics: ClientMetrics,
 }
 impl ClientService {
@@ -119,8 +132,12 @@ impl ClientService {
                         info!(logger, "New client-side RPC channel is created");
                         let command_tx = self.command_tx.clone();
                         let mut channels = channels.clone();
-                        let (mut channel, handle) =
-                            Channel::new(logger.clone(), server, self.metrics.clone());
+                        let (mut channel, handle) = Channel::new(
+                            logger.clone(),
+                            server,
+                            self.channel_options.clone(),
+                            self.metrics.clone(),
+                        );
                         channel
                             .inner
                             .set_keep_alive_timeout(self.keep_alive_timeout);
@@ -211,9 +228,14 @@ struct Channel {
     message_rx: mpsc::Receiver<Message>,
 }
 impl Channel {
-    fn new(logger: Logger, server: SocketAddr, metrics: ClientMetrics) -> (Self, ChannelHandle) {
+    fn new(
+        logger: Logger,
+        server: SocketAddr,
+        options: ChannelOptions,
+        metrics: ClientMetrics,
+    ) -> (Self, ChannelHandle) {
         let (message_tx, message_rx) = mpsc::channel();
-        let inner = ClientSideChannel::new(logger, server, metrics);
+        let inner = ClientSideChannel::new(logger, server, options, metrics);
         let channel = Channel { inner, message_rx };
         let handle = ChannelHandle { message_tx };
         (channel, handle)

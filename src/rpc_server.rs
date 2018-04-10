@@ -13,6 +13,7 @@ use prometrics::metrics::MetricBuilder;
 use slog::{Discard, Logger};
 
 use {Call, Cast, Error, ProcedureId};
+use channel::ChannelOptions;
 use message::OutgoingMessage;
 use metrics::{HandlerMetrics, ServerMetrics};
 use server_side_channel::ServerSideChannel;
@@ -24,6 +25,7 @@ pub struct ServerBuilder {
     bind_addr: SocketAddr,
     logger: Logger,
     handlers: MessageHandlers,
+    channel_options: ChannelOptions,
     metrics: MetricBuilder,
     handlers_metrics: HashMap<ProcedureId, HandlerMetrics>,
 }
@@ -34,6 +36,7 @@ impl ServerBuilder {
             bind_addr,
             logger: Logger::root(Discard, o!()),
             handlers: HashMap::new(),
+            channel_options: ChannelOptions::default(),
             metrics: MetricBuilder::new(),
             handlers_metrics: HashMap::new(),
         }
@@ -44,6 +47,14 @@ impl ServerBuilder {
     /// The default value is `Logger::root(Discard, o!())`.
     pub fn logger(&mut self, logger: Logger) -> &mut Self {
         self.logger = logger;
+        self
+    }
+
+    /// Sets `ChannelOptions` used by the service.
+    ///
+    /// The default value is `ChannelOptions::default()`.
+    pub fn channel_options(&mut self, options: ChannelOptions) -> &mut Self {
+        self.channel_options = options;
         self
     }
 
@@ -208,6 +219,7 @@ impl ServerBuilder {
             logger,
             spawner,
             assigner: Assigner::new(handlers),
+            channel_options: self.channel_options.clone(),
             metrics: ServerMetrics::new(self.metrics.clone(), self.handlers_metrics.clone()),
         }
     }
@@ -221,6 +233,7 @@ pub struct Server<S> {
     logger: Logger,
     spawner: S,
     assigner: Assigner,
+    channel_options: ChannelOptions,
     metrics: ServerMetrics,
 }
 impl<S> Server<S> {
@@ -242,6 +255,7 @@ where
                 let logger = self.logger.new(o!("client" => addr.to_string()));
                 info!(logger, "New TCP client");
 
+                let options = self.channel_options.clone();
                 let metrics = self.metrics.channels().create_channel_metrics(addr);
                 let channels = self.metrics.channels().clone();
                 let exit_logger = logger.clone();
@@ -250,8 +264,13 @@ where
                 let future = client
                     .map_err(|e| track!(Error::from(e)))
                     .and_then(move |stream| {
-                        let channel =
-                            ServerSideChannel::new(logger, stream, assigner.clone(), metrics);
+                        let channel = ServerSideChannel::new(
+                            logger,
+                            stream,
+                            assigner.clone(),
+                            options,
+                            metrics,
+                        );
                         ChannelHandler::new(spawner, channel)
                     });
                 self.spawner.spawn(future.then(move |result| {

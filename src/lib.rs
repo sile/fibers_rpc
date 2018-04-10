@@ -84,6 +84,7 @@ pub mod client {
     pub use client_service::{ClientService, ClientServiceBuilder, ClientServiceHandle};
     pub use rpc_client::{CallClient, CastClient, Options};
 }
+pub mod channel;
 pub mod metrics;
 pub mod server {
     //! RPC server.

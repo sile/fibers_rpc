@@ -11,6 +11,7 @@ use slog::Logger;
 use trackable::error::ErrorKindExt;
 
 use {Error, ErrorKind, Result};
+use channel::ChannelOptions;
 use client_side_handlers::{Assigner, BoxResponseHandler};
 use message::{MessageId, OutgoingMessage};
 use message_stream::MessageStream;
@@ -26,10 +27,16 @@ pub struct ClientSideChannel {
     next_message_id: MessageId,
     message_stream: MessageStreamState,
     exponential_backoff: ExponentialBackoff,
+    options: ChannelOptions,
     metrics: ClientMetrics,
 }
 impl ClientSideChannel {
-    pub fn new(logger: Logger, server: SocketAddr, metrics: ClientMetrics) -> Self {
+    pub fn new(
+        logger: Logger,
+        server: SocketAddr,
+        options: ChannelOptions,
+        metrics: ClientMetrics,
+    ) -> Self {
         ClientSideChannel {
             logger,
             server,
@@ -37,6 +44,7 @@ impl ClientSideChannel {
             next_message_id: MessageId(0),
             message_stream: MessageStreamState::new(server),
             exponential_backoff: ExponentialBackoff::new(),
+            options,
             metrics,
         }
     }
@@ -129,6 +137,7 @@ impl ClientSideChannel {
                     let stream = MessageStream::new(
                         stream,
                         Assigner::new(),
+                        self.options.clone(),
                         self.metrics.channels().create_channel_metrics(self.server),
                     );
                     let mut connected = MessageStreamState::Connected { stream };
@@ -182,9 +191,8 @@ impl Future for ClientSideChannel {
                 self.message_stream = next;
             }
 
-            // FIXME: parameterize
             count += 1;
-            if count > 128 {
+            if count > self.options.yield_threshold {
                 self.message_stream
                     .metrics()
                     .map(|m| m.fiber_yielded.increment());
