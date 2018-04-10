@@ -13,6 +13,25 @@ Rust RPC library built on top of [fibers] crate.
 
 [fibers]: https://github.com/dwango/fibers-rs
 
+Features
+---------
+
+- Asynchronous RPC server/client using [fibers] crate
+- Support two type RPC:
+  - Request/response model
+  - Notification model
+- Strongly typed RPC using [bytecodec] crate
+  - You can treat arbitrarily Rust structures that support [serde] as RPC messages
+  - It is possible to handle huge structures as RPC messages without compromising efficiency and real-time property by implementing your own encoder/decoder
+- Multiplexing multiple RPC messages in a single TCP stream
+- Prioritization between messages
+- Expose [Prometheus] metrics
+
+[fibers]: https://github.com/dwango/fibers-rs
+[bytecodec]: https://github.com/sile/bytecodec
+[serde]: https://crates.io/crates/serde
+[Prometheus]: https://prometheus.io/
+
 Examples
 --------
 
