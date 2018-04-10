@@ -28,6 +28,7 @@ pub struct MessageStream<A: AssignIncomingMessageHandler> {
 }
 impl<A: AssignIncomingMessageHandler> MessageStream<A> {
     pub fn new(transport_stream: TcpStream, assigner: A, metrics: ChannelMetrics) -> Self {
+        let _ = unsafe { transport_stream.with_inner(|s| s.set_nodelay(true)) };
         MessageStream {
             transport_stream,
             rbuf: ReadBuf::new(vec![0; BUF_SIZE]),
