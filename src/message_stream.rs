@@ -129,6 +129,9 @@ impl<A: AssignIncomingMessageHandler> MessageStream<A> {
                     self.packet_header_decoder.take_item();
                 }
                 if let Some(next_action) = item {
+                    track_assert_eq!(handler.consumable_bytes(), 0, ErrorKind::Other; header);
+                    track_assert!(header.is_end_of_message(), ErrorKind::Other; header);
+
                     let event = MessageEvent::Received { next_action };
                     return Ok(Some(event));
                 } else {
