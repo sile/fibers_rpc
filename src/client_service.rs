@@ -113,6 +113,16 @@ pub struct ClientService {
     metrics: ClientMetrics,
 }
 impl ClientService {
+    /// Makes a new `ClientService` with the default settings.
+    ///
+    /// If you want to customize some settings, please use `ClientServiceBuilder` instead of this.
+    pub fn new<S>(spawner: S) -> Self
+    where
+        S: Spawn + Send + 'static,
+    {
+        ClientServiceBuilder::new().finish(spawner)
+    }
+
     /// Returns a handle of the service.
     pub fn handle(&self) -> ClientServiceHandle {
         ClientServiceHandle {

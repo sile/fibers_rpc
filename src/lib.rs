@@ -4,7 +4,7 @@
 //! [fibers]: https://github.com/dwango/fibers-rs
 //!
 //! # Features
-//!!
+//!
 //! - Asynchronous RPC server/client using [fibers] crate
 //! - Support two type of RPC:
 //!   - Request/response model
