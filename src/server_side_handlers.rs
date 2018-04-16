@@ -329,13 +329,14 @@ where
         let (size, item) = track!(self.decoder.decode(buf, eos))?;
         if let Some(request) = item {
             let encoder = track_assert_some!(self.encoder.take(), bytecodec::ErrorKind::Other);
-            let header = self.header.clone();
-            let reply = self.handler
-                .handle_call(request)
-                .boxed(move |v| OutgoingMessage {
+            let mut header = self.header.clone();
+            let reply = self.handler.handle_call(request).boxed(move |v| {
+                header.async = T::enable_async_response(&v);
+                OutgoingMessage {
                     header,
                     payload: OutgoingMessagePayload::with_item(encoder, v),
-                });
+                }
+            });
             Ok((size, Some(Action::Reply(reply))))
         } else {
             Ok((size, None))

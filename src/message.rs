@@ -10,6 +10,7 @@ pub struct MessageHeader {
     pub id: MessageId,
     pub procedure: ProcedureId,
     pub priority: u8,
+    pub async: bool,
 }
 impl MessageHeader {
     pub const SIZE: usize = 8 + 4 + 1;
@@ -28,12 +29,13 @@ impl MessageHeader {
             id,
             procedure,
             priority,
+            async: false, // dummy
         }
     }
 }
 
 pub trait AssignIncomingMessageHandler {
-    type Handler: Decode;
+    type Handler: Decode + Send + 'static;
     fn assign_incoming_message_handler(&mut self, header: &MessageHeader) -> Result<Self::Handler>;
 }
 
@@ -124,11 +126,15 @@ impl<E: Encode> Encode for Lazy<E> {
     }
 
     fn is_idle(&self) -> bool {
-        self.inner.is_idle()
+        self.item.is_none() && self.inner.is_idle()
     }
 
     fn requiring_bytes(&self) -> ByteCount {
-        self.inner.requiring_bytes()
+        if self.item.is_some() {
+            ByteCount::Unknown
+        } else {
+            self.inner.requiring_bytes()
+        }
     }
 }
 

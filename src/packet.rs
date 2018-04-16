@@ -11,6 +11,7 @@ pub const MAX_PACKET_LEN: usize = PacketHeader::SIZE + MAX_PAYLOAD_LEN;
 pub const MAX_PAYLOAD_LEN: usize = 0xFFFF;
 
 const FLAG_END_OF_MESSAGE: u8 = 0b0000_0001;
+const FLAG_ASYNC: u8 = 0b0000_0010;
 
 #[derive(Debug, Clone)]
 pub struct PacketHeader {
@@ -28,8 +29,9 @@ impl PacketHeader {
     }
 
     fn read(buf: &[u8]) -> Self {
-        let message = MessageHeader::read(buf);
+        let mut message = MessageHeader::read(buf);
         let flags = buf[MessageHeader::SIZE];
+        message.async = (flags & FLAG_ASYNC) != 0;
         let payload_len = BigEndian::read_u16(&buf[MessageHeader::SIZE + 1..]);
         PacketHeader {
             message,
@@ -40,6 +42,10 @@ impl PacketHeader {
 
     pub fn is_end_of_message(&self) -> bool {
         (self.flags & FLAG_END_OF_MESSAGE) != 0
+    }
+
+    pub fn is_async(&self) -> bool {
+        (self.flags & FLAG_ASYNC) != 0
     }
 }
 
@@ -95,7 +101,8 @@ impl Encode for PacketizedMessage {
                 .encode(&mut buf[PacketHeader::SIZE..][..limit], eos)
         )?;
 
-        let flags = self.message.payload.is_idle() as u8 * FLAG_END_OF_MESSAGE;
+        let flags = (self.message.payload.is_idle() as u8 * FLAG_END_OF_MESSAGE)
+            | (self.message.header.async as u8 * FLAG_ASYNC);
         let packet_header = PacketHeader {
             message: self.message.header.clone(),
             flags,

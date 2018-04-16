@@ -87,6 +87,7 @@ extern crate bytecodec;
 extern crate byteorder;
 extern crate factory;
 extern crate fibers;
+extern crate fibers_tasque;
 extern crate futures;
 extern crate prometrics;
 #[macro_use]
@@ -163,6 +164,28 @@ pub trait Call: Sized + Send + Sync + 'static {
     /// Response message decoder.
     type ResDecoder: bytecodec::Decode<Item = Self::Res> + Send + 'static;
 
+    /// If it returns `true`, encoding/decoding request messages will be executed asynchronously.
+    ///
+    /// For large RPC messages, asynchronous encoding/decoding may improve real-time property
+    /// (especially if messages will be encoded/decoded by using `serde`).
+    ///
+    /// The default implementation always return `false`.
+    #[allow(unused_variables)]
+    fn enable_async_request(request: &Self::Req) -> bool {
+        false
+    }
+
+    /// If it returns `true`, encoding/decoding response messages will be executed asynchronously.
+    ///
+    /// For large RPC messages, asynchronous encoding/decoding may improve real-time property
+    /// (especially if messages will be encoded/decoded by using `serde`).
+    ///
+    /// The default implementation always return `false`.
+    #[allow(unused_variables)]
+    fn enable_async_response(response: &Self::Res) -> bool {
+        false
+    }
+
     /// Makes a new RPC client.
     fn client(service: &ClientServiceHandle) -> CallClient<Self>
     where
@@ -223,6 +246,17 @@ pub trait Cast: Sized + Sync + Send + 'static {
     /// Notification message decoder.
     type Decoder: bytecodec::Decode<Item = Self::Notification> + Send + 'static;
 
+    /// If it returns `true`, encoding/decoding notification messages will be executed asynchronously.
+    ///
+    /// For large RPC messages, asynchronous encoding/decoding may improve real-time property
+    /// (especially if messages will be encoded/decoded by using `serde`).
+    ///
+    /// The default implementation always return `false`.
+    #[allow(unused_variables)]
+    fn enable_async(notification: &Self::Notification) -> bool {
+        false
+    }
+
     /// Makes a new RPC client.
     fn client(service: &ClientServiceHandle) -> CastClient<Self>
     where
@@ -263,6 +297,14 @@ mod test {
         type Res = Vec<u8>;
         type ResEncoder = BytesEncoder<Vec<u8>>;
         type ResDecoder = RemainingBytesDecoder;
+
+        fn enable_async_request(x: &Self::Req) -> bool {
+            x == b"async"
+        }
+
+        fn enable_async_response(x: &Self::Res) -> bool {
+            x == b"async"
+        }
     }
 
     // Handler
@@ -287,13 +329,25 @@ mod test {
 
         // Client
         let service = ClientServiceBuilder::new().finish(executor.handle());
+        let service_handle = service.handle();
 
         let request = Vec::from(&b"hello"[..]);
-        let response = EchoRpc::client(&service.handle()).call(server_addr, request.clone());
+        let response = EchoRpc::client(&service_handle).call(server_addr, request.clone());
 
         executor.spawn(service.map_err(|e| panic!("{}", e)));
         let result = track_try_unwrap!(track_any_err!(executor.run_future(response)));
         assert_eq!(result.ok(), Some(request));
+
+        let metrics = service_handle
+            .metrics()
+            .channels()
+            .as_map()
+            .load()
+            .get(&server_addr)
+            .cloned()
+            .unwrap();
+        assert_eq!(metrics.async_outgoing_messages(), 0);
+        assert_eq!(metrics.async_incoming_messages(), 0);
     }
 
     #[test]
@@ -317,5 +371,40 @@ mod test {
         executor.spawn(service.map_err(|e| panic!("{}", e)));
         let result = track_try_unwrap!(track_any_err!(executor.run_future(response)));
         assert_eq!(result.ok(), Some(request));
+    }
+
+    #[test]
+    fn async_works() {
+        // Executor
+        let mut executor = track_try_unwrap!(track_any_err!(InPlaceExecutor::new()));
+
+        // Server
+        let server_addr = "127.0.0.1:1922".parse().unwrap();
+        let server = ServerBuilder::new(server_addr)
+            .add_call_handler(EchoHandler)
+            .finish(executor.handle());
+        executor.spawn(server.map_err(|e| panic!("{}", e)));
+
+        // Client
+        let service = ClientServiceBuilder::new().finish(executor.handle());
+        let service_handle = service.handle();
+
+        let request = Vec::from(&b"async"[..]);
+        let response = EchoRpc::client(&service_handle).call(server_addr, request.clone());
+
+        executor.spawn(service.map_err(|e| panic!("{}", e)));
+        let result = track_try_unwrap!(track_any_err!(executor.run_future(response)));
+        assert_eq!(result.ok(), Some(request));
+
+        let metrics = service_handle
+            .metrics()
+            .channels()
+            .as_map()
+            .load()
+            .get(&server_addr)
+            .cloned()
+            .unwrap();
+        assert_eq!(metrics.async_outgoing_messages(), 1);
+        assert_eq!(metrics.async_incoming_messages(), 1);
     }
 }

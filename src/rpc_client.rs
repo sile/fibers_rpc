@@ -42,12 +42,13 @@ where
             return Err(e.into());
         }
 
-        track!(self.encoder.start_encoding(notification))?;
         let header = MessageHeader {
             id: MessageId(0), // dummy
             procedure: T::ID,
             priority: self.options.priority,
+            async: T::enable_async(&notification),
         };
+        track!(self.encoder.start_encoding(notification))?;
         let message = Message {
             message: OutgoingMessage {
                 header,
@@ -122,6 +123,13 @@ impl<'a, T: Call> CallClient<'a, T> {
             let e = track!(ErrorKind::Unavailable.cause("too long transmit queue"));
             return Response::error(e.into());
         }
+
+        let header = MessageHeader {
+            id: MessageId(0), // dummy
+            procedure: T::ID,
+            priority: self.options.priority,
+            async: T::enable_async_request(&request),
+        };
         if let Err(e) = track!(self.encoder.start_encoding(request)) {
             self.service.metrics.error_responses.increment();
             return Response::error(e.into());
@@ -134,11 +142,6 @@ impl<'a, T: Call> CallClient<'a, T> {
             T::NAME,
         );
 
-        let header = MessageHeader {
-            id: MessageId(0), // dummy
-            procedure: T::ID,
-            priority: self.options.priority,
-        };
         let message = Message {
             message: OutgoingMessage {
                 header,

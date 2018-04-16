@@ -226,6 +226,8 @@ impl ChannelsMetrics {
 #[derive(Debug, Clone)]
 pub struct ChannelMetrics {
     pub(crate) fiber_yielded: Counter,
+    pub(crate) async_outgoing_messages: Counter,
+    pub(crate) async_incoming_messages: Counter,
     pub(crate) enqueued_outgoing_messages: Counter,
     pub(crate) dequeued_outgoing_messages: Counter,
 }
@@ -233,6 +235,16 @@ impl ChannelMetrics {
     /// Metric: `fibers_rpc_channel_fiber_yielded_total { role="server|client" } <COUNTER>`.
     pub fn fiber_yielded(&self) -> u64 {
         self.fiber_yielded.value() as u64
+    }
+
+    /// Metric: `fibers_rpc_async_outgoing_messages_total { role="server|client" } <COUNTER>`.
+    pub fn async_outgoing_messages(&self) -> u64 {
+        self.async_outgoing_messages.value() as u64
+    }
+
+    /// Metric: `fibers_rpc_async_incoming_messages_total { role="server|client" } <COUNTER>`.
+    pub fn async_incoming_messages(&self) -> u64 {
+        self.async_incoming_messages.value() as u64
     }
 
     /// Metric: `fibers_rpc_channel_enqueued_outgoing_messages { role="server|client" } <COUNTER>`.
@@ -259,6 +271,16 @@ impl ChannelMetrics {
             fiber_yielded: builder
                 .counter("fiber_yielded_total")
                 .help("Number of `fibers::fiber::yield_poll()` function calls")
+                .finish()
+                .expect("Never fails"),
+            async_outgoing_messages: builder
+                .counter("async_outgoing_messages_total")
+                .help("Number of asynchronous outgoing messages")
+                .finish()
+                .expect("Never fails"),
+            async_incoming_messages: builder
+                .counter("async_incoming_messages_total")
+                .help("Number of asynchronous incoming messages")
                 .finish()
                 .expect("Never fails"),
             enqueued_outgoing_messages: builder
