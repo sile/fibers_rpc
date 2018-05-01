@@ -74,11 +74,7 @@ impl OutgoingMessagePayload {
         E: Encode + Send + 'static,
         E::Item: Send + 'static,
     {
-        let encoder = Lazy {
-            inner: encoder,
-            item: Some(item),
-        };
-        Self::new(encoder)
+        OutgoingMessagePayload(Box::new(encoder.last_item(item)))
     }
 }
 impl fmt::Debug for OutgoingMessagePayload {
@@ -103,38 +99,6 @@ impl Encode for OutgoingMessagePayload {
 
     fn requiring_bytes(&self) -> ByteCount {
         self.0.requiring_bytes()
-    }
-}
-
-#[derive(Debug)]
-struct Lazy<E: Encode> {
-    inner: E,
-    item: Option<E::Item>,
-}
-impl<E: Encode> Encode for Lazy<E> {
-    type Item = Never;
-
-    fn encode(&mut self, buf: &mut [u8], eos: Eos) -> bytecodec::Result<usize> {
-        if let Some(item) = self.item.take() {
-            track!(self.inner.start_encoding(item))?;
-        }
-        track!(self.inner.encode(buf, eos))
-    }
-
-    fn start_encoding(&mut self, _item: Self::Item) -> bytecodec::Result<()> {
-        unreachable!()
-    }
-
-    fn is_idle(&self) -> bool {
-        self.item.is_none() && self.inner.is_idle()
-    }
-
-    fn requiring_bytes(&self) -> ByteCount {
-        if self.item.is_some() {
-            ByteCount::Unknown
-        } else {
-            self.inner.requiring_bytes()
-        }
     }
 }
 
