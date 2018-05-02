@@ -147,7 +147,7 @@ pub trait Call: Sized + Send + Sync + 'static {
     const NAME: &'static str;
 
     /// Request message.
-    type Req;
+    type Req: Send + 'static;
 
     /// Request message encoder.
     type ReqEncoder: bytecodec::Encode<Item = Self::Req> + Send + 'static;
@@ -238,7 +238,7 @@ pub trait Cast: Sized + Sync + Send + 'static {
     const NAME: &'static str;
 
     /// Notification message.
-    type Notification;
+    type Notification: Send + 'static;
 
     /// Notification message encoder.
     type Encoder: bytecodec::Encode<Item = Self::Notification> + Send + 'static;

@@ -89,8 +89,8 @@ impl Encode for OutgoingMessagePayload {
         self.0.encode(buf, eos)
     }
 
-    fn start_encoding(&mut self, item: Self::Item) -> bytecodec::Result<()> {
-        self.0.start_encoding(item)
+    fn start_encoding(&mut self, _item: Self::Item) -> bytecodec::Result<()> {
+        unreachable!()
     }
 
     fn is_idle(&self) -> bool {

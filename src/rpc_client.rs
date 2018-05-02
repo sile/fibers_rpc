@@ -2,7 +2,6 @@ use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
-use bytecodec::Encode;
 use trackable::error::ErrorKindExt;
 
 use {Call, Cast, ErrorKind, Result};
@@ -33,7 +32,7 @@ where
     }
 
     /// Sends the notification message to the RPC server.
-    pub fn cast(mut self, server: SocketAddr, notification: T::Notification) -> Result<()> {
+    pub fn cast(self, server: SocketAddr, notification: T::Notification) -> Result<()> {
         if !self.options
             .is_allowable_queue_len(&self.service.metrics, server)
         {
@@ -48,11 +47,10 @@ where
             priority: self.options.priority,
             async: T::enable_async(&notification),
         };
-        track!(self.encoder.start_encoding(notification))?;
         let message = Message {
             message: OutgoingMessage {
                 header,
-                payload: OutgoingMessagePayload::new(self.encoder),
+                payload: OutgoingMessagePayload::with_item(self.encoder, notification),
             },
             response_handler: None,
             force_wakeup: self.options.force_wakeup,
@@ -115,7 +113,7 @@ impl<'a, T: Call> CallClient<'a, T> {
 
     /// Sends the request message to the RPC server,
     /// and returns a future that represents the response from the server.
-    pub fn call(mut self, server: SocketAddr, request: T::Req) -> Response<T::Res> {
+    pub fn call(self, server: SocketAddr, request: T::Req) -> Response<T::Res> {
         if !self.options
             .is_allowable_queue_len(&self.service.metrics, server)
         {
@@ -130,10 +128,6 @@ impl<'a, T: Call> CallClient<'a, T> {
             priority: self.options.priority,
             async: T::enable_async_request(&request),
         };
-        if let Err(e) = track!(self.encoder.start_encoding(request)) {
-            self.service.metrics.error_responses.increment();
-            return Response::error(e.into());
-        }
 
         let (handler, response) = ResponseHandler::new(
             self.decoder,
@@ -145,7 +139,7 @@ impl<'a, T: Call> CallClient<'a, T> {
         let message = Message {
             message: OutgoingMessage {
                 header,
-                payload: OutgoingMessagePayload::new(self.encoder),
+                payload: OutgoingMessagePayload::with_item(self.encoder, request),
             },
             response_handler: Some(Box::new(handler)),
             force_wakeup: self.options.force_wakeup,
