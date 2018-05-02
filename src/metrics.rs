@@ -155,6 +155,7 @@ pub struct ChannelsMetrics {
     builder: Arc<Mutex<MetricBuilder>>,
     created_channels: Counter,
     removed_channels: Counter,
+    correction: Arc<ChannelMetrics>,
 }
 impl ChannelsMetrics {
     /// Metric: `fibers_rpc_channel_created_channels_total { role="client" } <COUNTER>`.
@@ -178,10 +179,11 @@ impl ChannelsMetrics {
         }
 
         self.created_channels.increment();
+        let correction = Arc::clone(&self.correction);
         let metrics = if let Ok(builder) = self.builder.lock() {
-            ChannelMetrics::new(&builder)
+            ChannelMetrics::new(&builder, Some(correction))
         } else {
-            ChannelMetrics::new(&MetricBuilder::without_registry())
+            ChannelMetrics::new(&MetricBuilder::without_registry(), Some(correction))
         };
         self.channels.update(|channels| {
             let mut channels = channels.clone();
@@ -205,6 +207,7 @@ impl ChannelsMetrics {
     fn new(parent_builder: &MetricBuilder, role: &str) -> Self {
         let mut builder = parent_builder.clone();
         builder.subsystem("channel").label("role", role);
+        let correction = Arc::new(ChannelMetrics::new(&builder, None));
         ChannelsMetrics {
             created_channels: builder
                 .counter("created_channels_total")
@@ -218,6 +221,7 @@ impl ChannelsMetrics {
                 .expect("Never fails"),
             channels: Arc::new(AtomicImmut::new(HashMap::new())),
             builder: Arc::new(Mutex::new(builder)),
+            correction,
         }
     }
 }
@@ -230,6 +234,7 @@ pub struct ChannelMetrics {
     pub(crate) async_incoming_messages: Counter,
     pub(crate) enqueued_outgoing_messages: Counter,
     pub(crate) dequeued_outgoing_messages: Counter,
+    correction: Option<Arc<ChannelMetrics>>,
 }
 impl ChannelMetrics {
     /// Metric: `fibers_rpc_channel_fiber_yielded_total { role="server|client" } <COUNTER>`.
@@ -266,7 +271,7 @@ impl ChannelMetrics {
         enqueued_messages.saturating_sub(dequeued_messages)
     }
 
-    fn new(builder: &MetricBuilder) -> Self {
+    fn new(builder: &MetricBuilder, correction: Option<Arc<Self>>) -> Self {
         ChannelMetrics {
             fiber_yielded: builder
                 .counter("fiber_yielded_total")
@@ -293,6 +298,22 @@ impl ChannelMetrics {
                 .help("Number of dequeued outgoing messages")
                 .finish()
                 .expect("Never fails"),
+            correction,
+        }
+    }
+}
+impl Drop for ChannelMetrics {
+    fn drop(&mut self) {
+        if let Some(ref c) = self.correction {
+            c.fiber_yielded.add_u64(self.fiber_yielded());
+            c.async_outgoing_messages
+                .add_u64(self.async_outgoing_messages());
+            c.async_incoming_messages
+                .add_u64(self.async_incoming_messages());
+            c.enqueued_outgoing_messages
+                .add_u64(self.enqueued_outgoing_messages());
+            c.dequeued_outgoing_messages
+                .add_u64(self.enqueued_outgoing_messages()); // Considers all messages dequeued
         }
     }
 }
