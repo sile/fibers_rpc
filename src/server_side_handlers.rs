@@ -254,8 +254,8 @@ where
         }
     }
 
-    fn has_terminated(&self) -> bool {
-        self.decoder.has_terminated()
+    fn is_idle(&self) -> bool {
+        self.decoder.is_idle()
     }
 
     fn requiring_bytes(&self) -> ByteCount {
@@ -343,8 +343,8 @@ where
         }
     }
 
-    fn has_terminated(&self) -> bool {
-        self.decoder.has_terminated() || self.encoder.is_none()
+    fn is_idle(&self) -> bool {
+        self.encoder.is_none()
     }
 
     fn requiring_bytes(&self) -> ByteCount {
