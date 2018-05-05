@@ -138,10 +138,6 @@ impl<D: Decode> Decode for ResponseHandler<D> {
         }
     }
 
-    fn is_idle(&self) -> bool {
-        self.reply_tx.is_none()
-    }
-
     fn requiring_bytes(&self) -> ByteCount {
         self.decoder.requiring_bytes()
     }

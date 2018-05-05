@@ -254,10 +254,6 @@ where
         }
     }
 
-    fn is_idle(&self) -> bool {
-        self.decoder.is_idle()
-    }
-
     fn requiring_bytes(&self) -> ByteCount {
         self.decoder.requiring_bytes()
     }
@@ -341,10 +337,6 @@ where
         } else {
             Ok((size, None))
         }
-    }
-
-    fn is_idle(&self) -> bool {
-        self.encoder.is_none()
     }
 
     fn requiring_bytes(&self) -> ByteCount {

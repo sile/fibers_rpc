@@ -66,10 +66,6 @@ impl Decode for PacketHeaderDecoder {
         }
     }
 
-    fn is_idle(&self) -> bool {
-        self.bytes.is_idle()
-    }
-
     fn requiring_bytes(&self) -> ByteCount {
         self.bytes.requiring_bytes()
     }
