@@ -1,24 +1,24 @@
-use std::collections::HashMap;
-use std::mem;
-use std::net::SocketAddr;
 use bytecodec::marker::Never;
 use factory::{DefaultFactory, Factory};
-use fibers::{BoxSpawn, Spawn};
 use fibers::net::TcpListener;
 use fibers::net::futures::{Connected, TcpListenerBind};
 use fibers::net::streams::Incoming;
 use fibers::sync::mpsc;
+use fibers::{BoxSpawn, Spawn};
 use futures::{Async, Future, Poll, Stream};
 use prometrics::metrics::MetricBuilder;
 use slog::{Discard, Logger};
+use std::collections::HashMap;
+use std::mem;
+use std::net::SocketAddr;
 
-use {Call, Cast, Error, ProcedureId};
 use channel::ChannelOptions;
 use message::OutgoingMessage;
 use metrics::{HandlerMetrics, ServerMetrics};
 use server_side_channel::ServerSideChannel;
 use server_side_handlers::{Action, Assigner, CallHandlerFactory, CastHandlerFactory, HandleCall,
                            HandleCast, MessageHandlers};
+use {Call, Cast, Error, ProcedureId};
 
 /// RPC server builder.
 pub struct ServerBuilder {

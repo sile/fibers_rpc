@@ -1,16 +1,16 @@
+use bytecodec::marker::Never;
+use bytecodec::{self, ByteCount, Decode, Eos};
+use factory::Factory;
+use futures::future::Either;
+use futures::{Async, Future, Poll};
 use std::collections::HashMap;
 use std::fmt;
 use std::marker::PhantomData;
 use std::sync::Arc;
-use bytecodec::{self, ByteCount, Decode, Eos};
-use bytecodec::marker::Never;
-use factory::Factory;
-use futures::{Async, Future, Poll};
-use futures::future::Either;
 
-use {Call, Cast, ErrorKind, ProcedureId, Result};
 use message::{AssignIncomingMessageHandler, MessageHeader, OutgoingMessage, OutgoingMessagePayload};
 use metrics::HandlerMetrics;
+use {Call, Cast, ErrorKind, ProcedureId, Result};
 
 pub type MessageHandlers = HashMap<ProcedureId, Box<MessageHandlerFactory>>;
 

@@ -1,14 +1,14 @@
+use atomic_immut::AtomicImmut;
+use fibers::sync::mpsc;
+use fibers::{BoxSpawn, Spawn};
+use futures::{Async, Future, Poll, Stream};
+use prometrics::metrics::MetricBuilder;
+use slog::{Discard, Logger};
 use std::collections::HashMap;
 use std::fmt;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
-use slog::{Discard, Logger};
-use atomic_immut::AtomicImmut;
-use fibers::{BoxSpawn, Spawn};
-use fibers::sync::mpsc;
-use futures::{Async, Future, Poll, Stream};
-use prometrics::metrics::MetricBuilder;
 
 use Error;
 use channel::ChannelOptions;

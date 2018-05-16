@@ -1,20 +1,20 @@
-use std::cmp;
-use std::collections::{BinaryHeap, HashMap};
-use std::fmt;
-use bytecodec::{Decode, DecodeExt, Encode, EncodeExt, Eos};
 use bytecodec::bytes::{BytesEncoder, RemainingBytesDecoder};
 use bytecodec::combinator::{Buffered, Slice};
 use bytecodec::io::{IoDecodeExt, IoEncodeExt, ReadBuf, WriteBuf};
+use bytecodec::{Decode, DecodeExt, Encode, EncodeExt, Eos};
 use fibers::net::TcpStream;
 use fibers::sync::mpsc;
 use fibers_tasque::DefaultCpuTaskQueue;
 use futures::{Async, Poll, Stream};
+use std::cmp;
+use std::collections::{BinaryHeap, HashMap};
+use std::fmt;
 
-use {Error, ErrorKind, Result};
 use channel::ChannelOptions;
 use message::{AssignIncomingMessageHandler, MessageId, OutgoingMessage, OutgoingMessagePayload};
 use metrics::ChannelMetrics;
 use packet::{PacketHeaderDecoder, PacketizedMessage, MIN_PACKET_LEN};
+use {Error, ErrorKind, Result};
 
 pub struct MessageStream<A: AssignIncomingMessageHandler> {
     transport_stream: TcpStream,

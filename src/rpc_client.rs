@@ -4,11 +4,11 @@ use std::sync::Arc;
 use std::time::Duration;
 use trackable::error::ErrorKindExt;
 
-use {Call, Cast, ErrorKind, Result};
 use client_service::{ClientServiceHandle, Message};
 use client_side_handlers::{Response, ResponseHandler};
 use message::{MessageHeader, MessageId, OutgoingMessage, OutgoingMessagePayload};
 use metrics::ClientMetrics;
+use {Call, Cast, ErrorKind, Result};
 
 /// Client for notification RPC.
 #[derive(Debug)]

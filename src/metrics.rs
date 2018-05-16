@@ -1,11 +1,11 @@
 //! [Prometheus][prometheus] metrics.
 //!
 //! [prometheus]: https://prometheus.io/
+use atomic_immut::AtomicImmut;
+use prometrics::metrics::{Counter, MetricBuilder};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
-use atomic_immut::AtomicImmut;
-use prometrics::metrics::{Counter, MetricBuilder};
 
 use ProcedureId;
 

@@ -8,19 +8,19 @@ extern crate sloggers;
 #[macro_use]
 extern crate trackable;
 
-use std::io::{self, Read, Write};
-use std::net::ToSocketAddrs;
-use std::time::{Duration, Instant};
 use bytecodec::bytes::{BytesEncoder, RemainingBytesDecoder};
 use clap::{App, Arg, SubCommand};
 use fibers::{Executor, Spawn, ThreadPoolExecutor};
-use fibers_rpc::{Call, ProcedureId};
 use fibers_rpc::client::{ClientServiceBuilder, ClientServiceHandle, Options as RpcOptions};
 use fibers_rpc::server::{HandleCall, Reply, ServerBuilder};
+use fibers_rpc::{Call, ProcedureId};
 use futures::{Async, Future, Poll};
 use sloggers::Build;
 use sloggers::terminal::TerminalLoggerBuilder;
 use sloggers::types::Severity;
+use std::io::{self, Read, Write};
+use std::net::ToSocketAddrs;
+use std::time::{Duration, Instant};
 use trackable::error::{ErrorKindExt, Failed, Failure};
 
 struct EchoRpc;

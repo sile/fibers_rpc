@@ -1,7 +1,7 @@
-use std::fmt;
-use bytecodec::{self, ByteCount, Decode, Encode, EncodeExt, Eos};
 use bytecodec::marker::Never;
+use bytecodec::{self, ByteCount, Decode, Encode, EncodeExt, Eos};
 use byteorder::{BigEndian, ByteOrder};
+use std::fmt;
 
 use {ProcedureId, Result};
 

@@ -1,8 +1,8 @@
-use std::cmp;
-use bytecodec::{self, ByteCount, Decode, Encode, Eos};
 use bytecodec::bytes::CopyableBytesDecoder;
 use bytecodec::marker::Never;
+use bytecodec::{self, ByteCount, Decode, Encode, Eos};
 use byteorder::{BigEndian, ByteOrder};
+use std::cmp;
 
 use message::{MessageHeader, OutgoingMessage};
 

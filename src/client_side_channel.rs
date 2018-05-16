@@ -1,21 +1,21 @@
-use std::fmt;
-use std::net::SocketAddr;
-use std::sync::mpsc::RecvError;
-use std::time::Duration;
 use fibers;
 use fibers::net::TcpStream;
 use fibers::net::futures::Connect;
 use fibers::time::timer::{self, Timeout};
 use futures::{Async, Future, Poll, Stream};
 use slog::Logger;
+use std::fmt;
+use std::net::SocketAddr;
+use std::sync::mpsc::RecvError;
+use std::time::Duration;
 use trackable::error::ErrorKindExt;
 
-use {Error, ErrorKind, Result};
 use channel::ChannelOptions;
 use client_side_handlers::{Assigner, BoxResponseHandler};
 use message::{MessageId, OutgoingMessage};
 use message_stream::MessageStream;
 use metrics::{ChannelMetrics, ClientMetrics};
+use {Error, ErrorKind, Result};
 
 pub const DEFAULT_KEEP_ALIVE_TIMEOUT_SECS: u64 = 60 * 10;
 

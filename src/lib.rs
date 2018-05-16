@@ -100,8 +100,8 @@ pub use error::{Error, ErrorKind};
 pub mod client {
     //! RPC client.
 
-    pub use client_side_handlers::Response;
     pub use client_service::{ClientService, ClientServiceBuilder, ClientServiceHandle};
+    pub use client_side_handlers::Response;
     pub use rpc_client::{CallClient, CastClient, Options};
 }
 pub mod channel;
@@ -280,9 +280,9 @@ mod test {
     use fibers::{Executor, InPlaceExecutor, Spawn};
     use futures::Future;
 
-    use {Call, ProcedureId};
     use client::ClientServiceBuilder;
     use server::{HandleCall, Reply, ServerBuilder};
+    use {Call, ProcedureId};
 
     // RPC
     struct EchoRpc;
