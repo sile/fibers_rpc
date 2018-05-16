@@ -1,5 +1,5 @@
 use bytecodec::bytes::{BytesEncoder, RemainingBytesDecoder};
-use bytecodec::combinator::{Buffered, Slice};
+use bytecodec::combinator::{Buffered, MaybeEos, Slice};
 use bytecodec::io::{IoDecodeExt, IoEncodeExt, ReadBuf, WriteBuf};
 use bytecodec::{Decode, DecodeExt, Encode, EncodeExt, Eos};
 use fibers::net::TcpStream;
@@ -21,7 +21,7 @@ pub struct MessageStream<A: AssignIncomingMessageHandler> {
     rbuf: ReadBuf<Vec<u8>>,
     wbuf: WriteBuf<Vec<u8>>,
     assigner: A,
-    packet_header_decoder: Buffered<PacketHeaderDecoder>,
+    packet_header_decoder: Buffered<MaybeEos<PacketHeaderDecoder>>,
     receiving_messages: HashMap<MessageId, Slice<A::Handler>>,
     sending_messages: BinaryHeap<SendingMessage>,
     async_outgoing_tx: mpsc::Sender<Result<OutgoingMessage>>,
@@ -57,7 +57,7 @@ where
             async_incoming_rx,
             async_incomings: HashMap::new(),
             assigner,
-            packet_header_decoder: PacketHeaderDecoder::default().buffered(),
+            packet_header_decoder: PacketHeaderDecoder::default().maybe_eos().buffered(),
             receiving_messages: HashMap::new(),
             seqno: 0,
             options,
