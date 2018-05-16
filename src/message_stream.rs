@@ -139,6 +139,7 @@ where
         Ok(None)
     }
 
+    #[cfg_attr(feature = "cargo-clippy", allow(map_entry))]
     fn handle_incoming_messages(
         &mut self,
     ) -> Result<Option<MessageEvent<<A::Handler as Decode>::Item>>> {

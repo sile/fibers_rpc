@@ -193,9 +193,9 @@ impl Future for ClientSideChannel {
 
             count += 1;
             if count > self.options.yield_threshold {
-                self.message_stream
-                    .metrics()
-                    .map(|m| m.fiber_yielded.increment());
+                if let Some(m) = self.message_stream.metrics() {
+                    m.fiber_yielded.increment();
+                }
                 return fibers::fiber::yield_poll();
             }
         }

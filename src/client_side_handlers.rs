@@ -112,7 +112,7 @@ impl<D: Decode> ResponseHandler<D> {
     ) -> (Self, Response<D::Item>) {
         let (reply_tx, reply_rx) = oneshot::monitor();
         let handler = ResponseHandler {
-            decoder: decoder,
+            decoder,
             reply_tx: Some(reply_tx),
             metrics,
             rpc_name,
