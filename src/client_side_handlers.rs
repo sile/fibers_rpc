@@ -126,20 +126,24 @@ impl<D: Decode> ResponseHandler<D> {
 impl<D: Decode> Decode for ResponseHandler<D> {
     type Item = ();
 
-    fn decode(&mut self, buf: &[u8], eos: Eos) -> bytecodec::Result<(usize, Option<Self::Item>)> {
-        let (size, item) = track!(self.decoder.decode(buf, eos); self.rpc_name)?;
-        if let Some(response) = item {
-            let reply_tx = self.reply_tx.take().expect("Never fails");
-            reply_tx.exit(Ok(response));
-            self.metrics.ok_responses.increment();
-            Ok((size, Some(())))
-        } else {
-            Ok((size, None))
-        }
+    fn decode(&mut self, buf: &[u8], eos: Eos) -> bytecodec::Result<usize> {
+        track!(self.decoder.decode(buf, eos); self.rpc_name)
+    }
+
+    fn finish_decoding(&mut self) -> bytecodec::Result<Self::Item> {
+        let response = track!(self.decoder.finish_decoding(); self.rpc_name)?;
+        let reply_tx = self.reply_tx.take().expect("Never fails");
+        reply_tx.exit(Ok(response));
+        self.metrics.ok_responses.increment();
+        Ok(())
     }
 
     fn requiring_bytes(&self) -> ByteCount {
         self.decoder.requiring_bytes()
+    }
+
+    fn is_idle(&self) -> bool {
+        self.decoder.is_idle()
     }
 }
 impl<D: Decode> HandleResponse for ResponseHandler<D> {

@@ -64,9 +64,9 @@ pub struct OutgoingMessagePayload(Box<Encode<Item = Never> + Send + 'static>);
 impl OutgoingMessagePayload {
     pub fn new<E>(encoder: E) -> Self
     where
-        E: Encode + Send + 'static,
+        E: Encode<Item = Never> + Send + 'static,
     {
-        OutgoingMessagePayload(Box::new(encoder.last()))
+        OutgoingMessagePayload(Box::new(encoder))
     }
 
     pub fn with_item<E>(encoder: E, item: E::Item) -> Self
@@ -74,7 +74,7 @@ impl OutgoingMessagePayload {
         E: Encode + Send + 'static,
         E::Item: Send + 'static,
     {
-        OutgoingMessagePayload(Box::new(encoder.last_item(item)))
+        OutgoingMessagePayload(Box::new(encoder.last(item)))
     }
 }
 impl fmt::Debug for OutgoingMessagePayload {

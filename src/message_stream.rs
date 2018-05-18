@@ -1,5 +1,5 @@
 use bytecodec::bytes::{BytesEncoder, RemainingBytesDecoder};
-use bytecodec::combinator::{Buffered, MaybeEos, Slice};
+use bytecodec::combinator::{MaybeEos, Peekable, Slice};
 use bytecodec::io::{IoDecodeExt, IoEncodeExt, ReadBuf, WriteBuf};
 use bytecodec::{Decode, DecodeExt, Encode, EncodeExt, Eos};
 use fibers::net::TcpStream;
@@ -21,7 +21,7 @@ pub struct MessageStream<A: AssignIncomingMessageHandler> {
     rbuf: ReadBuf<Vec<u8>>,
     wbuf: WriteBuf<Vec<u8>>,
     assigner: A,
-    packet_header_decoder: Buffered<MaybeEos<PacketHeaderDecoder>>,
+    packet_header_decoder: Peekable<MaybeEos<PacketHeaderDecoder>>,
     receiving_messages: HashMap<MessageId, Slice<A::Handler>>,
     sending_messages: BinaryHeap<SendingMessage>,
     async_outgoing_tx: mpsc::Sender<Result<OutgoingMessage>>,
@@ -43,7 +43,7 @@ where
         options: ChannelOptions,
         metrics: ChannelMetrics,
     ) -> Self {
-        let _ = unsafe { transport_stream.with_inner(|s| s.set_nodelay(true)) };
+        let _ = transport_stream.set_nodelay(true);
         let (async_outgoing_tx, async_outgoing_rx) = mpsc::channel();
         let (async_incoming_tx, async_incoming_rx) = mpsc::channel();
         MessageStream {
@@ -57,7 +57,7 @@ where
             async_incoming_rx,
             async_incomings: HashMap::new(),
             assigner,
-            packet_header_decoder: PacketHeaderDecoder::default().maybe_eos().buffered(),
+            packet_header_decoder: PacketHeaderDecoder::default().maybe_eos().peekable(),
             receiving_messages: HashMap::new(),
             seqno: 0,
             options,
@@ -84,7 +84,7 @@ where
                         let mut payload = Vec::new();
                         track!(message.payload.encode_all(&mut payload))?;
                         let payload =
-                            OutgoingMessagePayload::new(track!(BytesEncoder::with_item(payload))?);
+                            OutgoingMessagePayload::new(BytesEncoder::new().last(payload));
                         Ok(OutgoingMessage { header, payload })
                     };
                     let _ = tx.send(f());
@@ -146,12 +146,12 @@ where
         loop {
             track!(self.rbuf.fill(&mut self.transport_stream))?;
 
-            if !self.packet_header_decoder.has_item() {
+            if !self.packet_header_decoder.is_idle() {
                 track!(
                     self.packet_header_decoder
                         .decode_from_read_buf(&mut self.rbuf)
                 )?;
-                if let Some(header) = self.packet_header_decoder.get_item().cloned() {
+                if let Some(header) = self.packet_header_decoder.peek().cloned() {
                     if header.is_async() {
                         let decoder = self.async_incomings
                             .entry(header.message.id)
@@ -174,20 +174,21 @@ where
                 }
             }
 
-            if let Some(header) = self.packet_header_decoder.get_item().cloned() {
+            if let Some(header) = self.packet_header_decoder.peek().cloned() {
                 if header.is_async() {
                     let mut decoder = self.async_incomings
                         .remove(&header.message.id)
                         .expect("Never fails");
 
-                    let item = track!(decoder.decode_from_read_buf(&mut self.rbuf))?;
-                    track_assert!(item.is_none(), ErrorKind::Other);
+                    track!(decoder.decode_from_read_buf(&mut self.rbuf))?;
+                    track_assert!(!decoder.is_idle(), ErrorKind::Other);
+
                     if decoder.is_suspended() {
-                        self.packet_header_decoder.take_item();
+                        let _ = track!(self.packet_header_decoder.finish_decoding())?;
                     }
                     if decoder.is_suspended() && header.is_end_of_message() {
-                        let item = track!(decoder.decode(&[][..], Eos::new(true)))?.1;
-                        let buf = track_assert_some!(item, ErrorKind::Other);
+                        track!(decoder.decode(&[][..], Eos::new(true)))?;
+                        let buf = track!(decoder.finish_decoding())?;
                         self.metrics.async_incoming_messages.increment();
 
                         let tx = self.async_incoming_tx.clone();
@@ -198,8 +199,9 @@ where
                         DefaultCpuTaskQueue.with(|tasque| {
                             tasque.enqueue(move || {
                                 let mut f = || {
-                                    let item = track!(handler.decode(&buf[..], Eos::new(true)))?.1;
-                                    let action = track_assert_some!(item, ErrorKind::Other);
+                                    let size = track!(handler.decode(&buf[..], Eos::new(true)))?;
+                                    track_assert_eq!(size, buf.len(), ErrorKind::Other);
+                                    let action = track!(handler.finish_decoding())?;
                                     Ok(action)
                                 };
                                 let _ = tx.send(f());
@@ -213,14 +215,15 @@ where
                         .remove(&header.message.id)
                         .expect("Never fails");
 
-                    let mut item = track!(handler.decode_from_read_buf(&mut self.rbuf))?;
-                    if item.is_none() && handler.is_suspended() && header.is_end_of_message() {
-                        item = track!(handler.decode(&[][..], Eos::new(true)); header)?.1;
+                    track!(handler.decode_from_read_buf(&mut self.rbuf))?;
+                    if !handler.is_idle() && handler.is_suspended() && header.is_end_of_message() {
+                        track!(handler.decode(&[][..], Eos::new(true)); header)?;
                     }
                     if handler.is_suspended() {
-                        self.packet_header_decoder.take_item();
+                        let _ = track!(self.packet_header_decoder.finish_decoding())?;
                     }
-                    if let Some(next_action) = item {
+                    if handler.is_idle() {
+                        let next_action = track!(handler.finish_decoding(); header)?;
                         track_assert_eq!(handler.consumable_bytes(), 0, ErrorKind::Other; header);
                         track_assert!(header.is_end_of_message(), ErrorKind::Other; header);
 

@@ -244,18 +244,22 @@ where
 {
     type Item = Action;
 
-    fn decode(&mut self, buf: &[u8], eos: Eos) -> bytecodec::Result<(usize, Option<Self::Item>)> {
-        let (size, item) = track!(self.decoder.decode(buf, eos))?;
-        if let Some(notification) = item {
-            let noreply = self.handler.handle_cast(notification);
-            Ok((size, Some(Action::NoReply(noreply))))
-        } else {
-            Ok((size, None))
-        }
+    fn decode(&mut self, buf: &[u8], eos: Eos) -> bytecodec::Result<usize> {
+        track!(self.decoder.decode(buf, eos); T::NAME)
+    }
+
+    fn finish_decoding(&mut self) -> bytecodec::Result<Self::Item> {
+        let notification = track!(self.decoder.finish_decoding(); T::NAME)?;
+        let noreply = self.handler.handle_cast(notification);
+        Ok(Action::NoReply(noreply))
     }
 
     fn requiring_bytes(&self) -> ByteCount {
         self.decoder.requiring_bytes()
+    }
+
+    fn is_idle(&self) -> bool {
+        self.decoder.is_idle()
     }
 }
 
@@ -321,22 +325,23 @@ where
 {
     type Item = Action;
 
-    fn decode(&mut self, buf: &[u8], eos: Eos) -> bytecodec::Result<(usize, Option<Self::Item>)> {
-        let (size, item) = track!(self.decoder.decode(buf, eos))?;
-        if let Some(request) = item {
-            let encoder = track_assert_some!(self.encoder.take(), bytecodec::ErrorKind::Other);
-            let mut header = self.header.clone();
-            let reply = self.handler.handle_call(request).boxed(move |v| {
-                header.async = T::enable_async_response(&v);
-                OutgoingMessage {
-                    header,
-                    payload: OutgoingMessagePayload::with_item(encoder, v),
-                }
-            });
-            Ok((size, Some(Action::Reply(reply))))
-        } else {
-            Ok((size, None))
-        }
+    fn decode(&mut self, buf: &[u8], eos: Eos) -> bytecodec::Result<usize> {
+        track!(self.decoder.decode(buf, eos); T::NAME)
+    }
+
+    fn finish_decoding(&mut self) -> bytecodec::Result<Self::Item> {
+        let request = track!(self.decoder.finish_decoding(); T::NAME)?;
+        let encoder = track_assert_some!(self.encoder.take(), bytecodec::ErrorKind::DecoderTerminated;
+                                         T::NAME);
+        let mut header = self.header.clone();
+        let reply = self.handler.handle_call(request).boxed(move |v| {
+            header.async = T::enable_async_response(&v);
+            OutgoingMessage {
+                header,
+                payload: OutgoingMessagePayload::with_item(encoder, v),
+            }
+        });
+        Ok(Action::Reply(reply))
     }
 
     fn requiring_bytes(&self) -> ByteCount {
@@ -345,5 +350,9 @@ where
         } else {
             self.decoder.requiring_bytes()
         }
+    }
+
+    fn is_idle(&self) -> bool {
+        self.encoder.is_none() || self.decoder.is_idle()
     }
 }

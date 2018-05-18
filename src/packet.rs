@@ -56,18 +56,22 @@ pub struct PacketHeaderDecoder {
 impl Decode for PacketHeaderDecoder {
     type Item = PacketHeader;
 
-    fn decode(&mut self, buf: &[u8], eos: Eos) -> bytecodec::Result<(usize, Option<Self::Item>)> {
-        let (size, item) = track!(self.bytes.decode(buf, eos))?;
-        if let Some(bytes) = item {
-            let header = PacketHeader::read(&bytes[..]);
-            Ok((size, Some(header)))
-        } else {
-            Ok((size, None))
-        }
+    fn decode(&mut self, buf: &[u8], eos: Eos) -> bytecodec::Result<usize> {
+        track!(self.bytes.decode(buf, eos))
+    }
+
+    fn finish_decoding(&mut self) -> bytecodec::Result<Self::Item> {
+        let bytes = track!(self.bytes.finish_decoding())?;
+        let header = PacketHeader::read(&bytes[..]);
+        Ok(header)
     }
 
     fn requiring_bytes(&self) -> ByteCount {
         self.bytes.requiring_bytes()
+    }
+
+    fn is_idle(&self) -> bool {
+        self.bytes.is_idle()
     }
 }
 
