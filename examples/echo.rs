@@ -15,9 +15,9 @@ use fibers_rpc::client::{ClientServiceBuilder, ClientServiceHandle, Options as R
 use fibers_rpc::server::{HandleCall, Reply, ServerBuilder};
 use fibers_rpc::{Call, ProcedureId};
 use futures::{Async, Future, Poll};
-use sloggers::Build;
 use sloggers::terminal::TerminalLoggerBuilder;
 use sloggers::types::Severity;
+use sloggers::Build;
 use std::io::{self, Read, Write};
 use std::net::ToSocketAddrs;
 use std::time::{Duration, Instant};

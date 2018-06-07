@@ -3,12 +3,12 @@ use fibers::net::TcpStream;
 use futures::{Async, Poll, Stream};
 use slog::Logger;
 
-use Error;
 use channel::ChannelOptions;
 use message::OutgoingMessage;
 use message_stream::{MessageEvent, MessageStream};
 use metrics::ChannelMetrics;
 use server_side_handlers::{Action, Assigner};
+use Error;
 
 #[derive(Debug)]
 pub struct ServerSideChannel {

@@ -1,8 +1,8 @@
 use bytecodec::marker::Never;
 use factory::{DefaultFactory, Factory};
-use fibers::net::TcpListener;
 use fibers::net::futures::{Connected, TcpListenerBind};
 use fibers::net::streams::Incoming;
+use fibers::net::TcpListener;
 use fibers::sync::mpsc;
 use fibers::{BoxSpawn, Spawn};
 use futures::{Async, Future, Poll, Stream};

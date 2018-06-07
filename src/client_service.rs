@@ -10,12 +10,12 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use Error;
 use channel::ChannelOptions;
 use client_side_channel::{ClientSideChannel, DEFAULT_KEEP_ALIVE_TIMEOUT_SECS};
 use client_side_handlers::BoxResponseHandler;
 use message::OutgoingMessage;
 use metrics::ClientMetrics;
+use Error;
 
 /// `ClientService` builder.
 #[derive(Debug)]

@@ -1,6 +1,6 @@
 use fibers;
-use fibers::net::TcpStream;
 use fibers::net::futures::Connect;
+use fibers::net::TcpStream;
 use fibers::time::timer::{self, Timeout};
 use futures::{Async, Future, Poll, Stream};
 use slog::Logger;
