@@ -1,4 +1,6 @@
 //! RPC channel related components.
+use std::time::Duration;
+
 use packet::MAX_PACKET_LEN;
 
 /// Options for a RPC channel.
@@ -19,6 +21,9 @@ pub struct ChannelOptions {
     ///
     /// If it exceeds this value, it will break the loop by calling `fibers::fiber::yield_poll()`.
     pub yield_threshold: usize,
+
+    /// TCP connect timeout duration.
+    pub tcp_connect_timeout: Duration,
 }
 impl ChannelOptions {
     /// The default value of `read_buffer_size` field.
@@ -32,6 +37,9 @@ impl ChannelOptions {
 
     /// The default value of `yield_threshold` field.
     pub const DEFAULT_YIELD_THRESHOLD: usize = 128;
+
+    /// The default duration of `tcp_connect_timeout` field.
+    pub const DEFAULT_TCP_CONNECT_TIMEOUT_SECONDS: u64 = 5;
 }
 impl Default for ChannelOptions {
     fn default() -> Self {
@@ -40,6 +48,7 @@ impl Default for ChannelOptions {
             write_buffer_size: Self::DEFAULT_WRITE_BUFFER_SIZE,
             max_transmit_queue_len: Self::DEFAULT_MAX_TRANSMIT_QUEUE_LEN,
             yield_threshold: Self::DEFAULT_YIELD_THRESHOLD,
+            tcp_connect_timeout: Duration::from_secs(Self::DEFAULT_TCP_CONNECT_TIMEOUT_SECONDS),
         }
     }
 }

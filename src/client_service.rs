@@ -137,7 +137,7 @@ impl ClientService {
             Command::CreateChannel { server, message } => {
                 if !self.channels.load().contains_key(&server) {
                     self.channels.update(|channels| {
-                        let logger = self.logger.new(o!("peer" => server.to_string()));
+                        let logger = self.logger.new(o!("server" => server.to_string()));
 
                         info!(logger, "New client-side RPC channel is created");
                         let command_tx = self.command_tx.clone();

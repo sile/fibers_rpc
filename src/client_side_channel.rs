@@ -1,7 +1,6 @@
 use fibers;
-use fibers::net::futures::Connect;
 use fibers::net::TcpStream;
-use fibers::time::timer::{self, Timeout};
+use fibers::time::timer::{self, Timeout, TimerExt};
 use futures::{Async, Future, Poll, Stream};
 use slog::Logger;
 use std::fmt;
@@ -42,7 +41,7 @@ impl ClientSideChannel {
             server,
             keep_alive: KeepAlive::new(Duration::from_secs(DEFAULT_KEEP_ALIVE_TIMEOUT_SECS)),
             next_message_id: MessageId(0),
-            message_stream: MessageStreamState::new(server),
+            message_stream: MessageStreamState::new(server, &options),
             exponential_backoff: ExponentialBackoff::new(),
             options,
             metrics,
@@ -68,7 +67,7 @@ impl ClientSideChannel {
             self.exponential_backoff.next();
             let next = MessageStreamState::Connecting {
                 buffer: Vec::new(),
-                future: TcpStream::connect(self.server),
+                future: tcp_connect(self.server, &self.options),
             };
             self.message_stream = next;
         }
@@ -78,6 +77,7 @@ impl ClientSideChannel {
         server: SocketAddr,
         backoff: &mut ExponentialBackoff,
         metrics: &ClientMetrics,
+        options: &ChannelOptions,
     ) -> MessageStreamState {
         metrics.channels().remove_channel_metrics(server);
         if let Some(timeout) = backoff.timeout() {
@@ -86,7 +86,7 @@ impl ClientSideChannel {
             backoff.next();
             MessageStreamState::Connecting {
                 buffer: Vec::new(),
-                future: TcpStream::connect(server),
+                future: tcp_connect(server, options),
             }
         }
     }
@@ -103,7 +103,7 @@ impl ClientSideChannel {
                     self.exponential_backoff.next();
                     let next = MessageStreamState::Connecting {
                         buffer: Vec::new(),
-                        future: TcpStream::connect(self.server),
+                        future: tcp_connect(self.server, &self.options),
                     };
                     Ok(Async::Ready(Some(next)))
                 } else {
@@ -123,6 +123,7 @@ impl ClientSideChannel {
                         self.server,
                         &mut self.exponential_backoff,
                         &self.metrics,
+                        &self.options,
                     );
                     Ok(Async::Ready(Some(next)))
                 }
@@ -154,6 +155,7 @@ impl ClientSideChannel {
                         self.server,
                         &mut self.exponential_backoff,
                         &self.metrics,
+                        &self.options,
                     );
                     Ok(Async::Ready(Some(next)))
                 }
@@ -164,6 +166,7 @@ impl ClientSideChannel {
                         self.server,
                         &mut self.exponential_backoff,
                         &self.metrics,
+                        &self.options,
                     );
                     Ok(Async::Ready(Some(next)))
                 }
@@ -209,24 +212,23 @@ impl Drop for ClientSideChannel {
 }
 
 #[cfg_attr(feature = "cargo-clippy", allow(large_enum_variant))]
-#[derive(Debug)]
 enum MessageStreamState {
     Wait {
         timeout: Timeout,
     },
     Connecting {
         buffer: Vec<BufferedMessage>,
-        future: Connect,
+        future: Box<Future<Item = TcpStream, Error = Error> + Send + 'static>,
     },
     Connected {
         stream: MessageStream<Assigner>,
     },
 }
 impl MessageStreamState {
-    fn new(addr: SocketAddr) -> Self {
+    fn new(addr: SocketAddr, options: &ChannelOptions) -> Self {
         MessageStreamState::Connecting {
             buffer: Vec::new(),
-            future: TcpStream::connect(addr),
+            future: tcp_connect(addr, options),
         }
     }
 
@@ -257,6 +259,19 @@ impl MessageStreamState {
                         .assigner_mut()
                         .register_response_handler(message_id, handler);
                 }
+            }
+        }
+    }
+}
+impl fmt::Debug for MessageStreamState {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            MessageStreamState::Wait { timeout } => write!(f, "Wait {{ timeout: {:?} }}", timeout),
+            MessageStreamState::Connecting { buffer, .. } => {
+                write!(f, "Connecting {{ buffer: {:?}, .. }}", buffer)
+            }
+            MessageStreamState::Connected { stream } => {
+                write!(f, "Connected {{ stream: {:?} }}", stream)
             }
         }
     }
@@ -344,4 +359,17 @@ impl ExponentialBackoff {
 
 fn from_timeout_error(_: RecvError) -> Error {
     ErrorKind::Other.cause("Broken timer").into()
+}
+
+fn tcp_connect(
+    server: SocketAddr,
+    options: &ChannelOptions,
+) -> Box<Future<Item = TcpStream, Error = Error> + Send + 'static> {
+    let future = TcpStream::connect(server)
+        .timeout_after(options.tcp_connect_timeout)
+        .map_err(|e| {
+            e.map(Error::from)
+                .unwrap_or_else(|| ErrorKind::Timeout.error().into())
+        });
+    Box::new(track_err!(future))
 }
