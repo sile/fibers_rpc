@@ -252,19 +252,19 @@ impl ChannelMetrics {
         self.async_incoming_messages.value() as u64
     }
 
-    /// Metric: `fibers_rpc_channel_enqueued_outgoing_messages { role="server|client" } <COUNTER>`.
+    /// Metric: `fibers_rpc_channel_enqueued_outgoing_messages_total { role="server|client" } <COUNTER>`.
     pub fn enqueued_outgoing_messages(&self) -> u64 {
         self.enqueued_outgoing_messages.value() as u64
     }
 
-    /// Metric: `fibers_rpc_channel_dequeued_outgoing_messages { role="server|client" } <COUNTER>`.
+    /// Metric: `fibers_rpc_channel_dequeued_outgoing_messages_total { role="server|client" } <COUNTER>`.
     pub fn dequeued_outgoing_messages(&self) -> u64 {
         self.dequeued_outgoing_messages.value() as u64
     }
 
     /// Returns the number of messages in the transmit queue of the channel.
     ///
-    /// PromQL: `fibers_rpc_channel_enqueued_outgoing_message - fibers_rpc_channel_dequeued_outgoing_messages`
+    /// PromQL: `fibers_rpc_channel_enqueued_outgoing_messages_total - fibers_rpc_channel_dequeued_outgoing_messages_total`
     pub fn queue_len(&self) -> u64 {
         let dequeued_messages = self.dequeued_outgoing_messages();
         let enqueued_messages = self.enqueued_outgoing_messages();
