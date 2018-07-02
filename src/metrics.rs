@@ -5,6 +5,8 @@ use atomic_immut::AtomicImmut;
 use prometrics::metrics::{Counter, MetricBuilder};
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
 use ProcedureId;
@@ -235,6 +237,7 @@ pub struct ChannelMetrics {
     pub(crate) enqueued_outgoing_messages: Counter,
     pub(crate) dequeued_outgoing_messages: Counter,
     correction: Option<Arc<ChannelMetrics>>,
+    last_one: LastOne,
 }
 impl ChannelMetrics {
     /// Metric: `fibers_rpc_channel_fiber_yielded_total { role="server|client" } <COUNTER>`.
@@ -299,12 +302,16 @@ impl ChannelMetrics {
                 .finish()
                 .expect("Never fails"),
             correction,
+            last_one: LastOne::default(),
         }
     }
 }
 impl Drop for ChannelMetrics {
     fn drop(&mut self) {
         if let Some(ref c) = self.correction {
+            if !self.last_one.release() {
+                return;
+            }
             c.fiber_yielded.add_u64(self.fiber_yielded());
             c.async_outgoing_messages
                 .add_u64(self.async_outgoing_messages());
@@ -315,5 +322,52 @@ impl Drop for ChannelMetrics {
             c.dequeued_outgoing_messages
                 .add_u64(self.enqueued_outgoing_messages()); // Considers all messages dequeued
         }
+    }
+}
+
+#[derive(Debug)]
+struct LastOne(Arc<AtomicUsize>);
+impl LastOne {
+    /// Releases this instance and returns `true` if it is the last one.
+    fn release(&self) -> bool {
+        let n = self.0.fetch_sub(1, Ordering::SeqCst);
+        n == 1
+    }
+}
+impl Default for LastOne {
+    fn default() -> Self {
+        LastOne(Arc::new(AtomicUsize::new(1)))
+    }
+}
+impl Clone for LastOne {
+    fn clone(&self) -> Self {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        LastOne(Arc::clone(&self.0))
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn correction_works() {
+        let builder = MetricBuilder::new();
+        let channels = ChannelsMetrics::new(&builder, "server");
+        assert_eq!(channels.correction.enqueued_outgoing_messages(), 0);
+        {
+            let channel0 = channels.create_channel_metrics("127.0.0.1:80".parse().unwrap());
+            channel0.enqueued_outgoing_messages.increment();
+
+            let channel1 = channel0.clone();
+            channel1.enqueued_outgoing_messages.increment();
+
+            assert_eq!(channels.correction.enqueued_outgoing_messages(), 0);
+            assert_eq!(channel0.enqueued_outgoing_messages(), 2);
+            assert_eq!(channel1.enqueued_outgoing_messages(), 2);
+
+            channels.remove_channel_metrics("127.0.0.1:80".parse().unwrap());
+        }
+        assert_eq!(channels.correction.enqueued_outgoing_messages(), 2);
     }
 }
