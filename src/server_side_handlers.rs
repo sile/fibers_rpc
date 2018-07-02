@@ -8,7 +8,9 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use message::{AssignIncomingMessageHandler, MessageHeader, OutgoingMessage, OutgoingMessagePayload};
+use message::{
+    AssignIncomingMessageHandler, MessageHeader, OutgoingMessage, OutgoingMessagePayload,
+};
 use metrics::HandlerMetrics;
 use {Call, Cast, ErrorKind, ProcedureId, Result};
 

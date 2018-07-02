@@ -16,8 +16,10 @@ use channel::ChannelOptions;
 use message::OutgoingMessage;
 use metrics::{HandlerMetrics, ServerMetrics};
 use server_side_channel::ServerSideChannel;
-use server_side_handlers::{Action, Assigner, CallHandlerFactory, CastHandlerFactory, HandleCall,
-                           HandleCast, MessageHandlers};
+use server_side_handlers::{
+    Action, Assigner, CallHandlerFactory, CastHandlerFactory, HandleCall, HandleCast,
+    MessageHandlers,
+};
 use {Call, Cast, Error, ProcedureId};
 
 /// RPC server builder.
