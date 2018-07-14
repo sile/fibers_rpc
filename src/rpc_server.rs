@@ -23,6 +23,7 @@ use server_side_handlers::{
 use {Call, Cast, Error, ProcedureId};
 
 /// RPC server builder.
+#[derive(Debug)]
 pub struct ServerBuilder {
     bind_addr: SocketAddr,
     logger: Logger,
@@ -37,7 +38,7 @@ impl ServerBuilder {
         ServerBuilder {
             bind_addr,
             logger: Logger::root(Discard, o!()),
-            handlers: HashMap::new(),
+            handlers: MessageHandlers(HashMap::new()),
             channel_options: ChannelOptions::default(),
             metrics: MetricBuilder::new(),
             handlers_metrics: HashMap::new(),
@@ -148,7 +149,7 @@ impl ServerBuilder {
         E: Factory<Item = T::ResEncoder> + Send + Sync + 'static,
     {
         assert!(
-            !self.handlers.contains_key(&T::ID),
+            !self.handlers.0.contains_key(&T::ID),
             "RPC registration conflicts: procedure={:?}, name={:?}",
             T::ID,
             T::NAME
@@ -158,7 +159,7 @@ impl ServerBuilder {
         self.handlers_metrics.insert(T::ID, metrics.clone());
 
         let handler = CallHandlerFactory::new(handler, decoder_factory, encoder_factory, metrics);
-        self.handlers.insert(T::ID, Box::new(handler));
+        self.handlers.0.insert(T::ID, Box::new(handler));
         self
     }
 
@@ -194,7 +195,7 @@ impl ServerBuilder {
         D: Factory<Item = T::Decoder> + Send + Sync + 'static,
     {
         assert!(
-            !self.handlers.contains_key(&T::ID),
+            !self.handlers.0.contains_key(&T::ID),
             "RPC registration conflicts: procedure={:?}, name={:?}",
             T::ID,
             T::NAME
@@ -204,7 +205,7 @@ impl ServerBuilder {
         self.handlers_metrics.insert(T::ID, metrics.clone());
 
         let handler = CastHandlerFactory::new(handler, decoder_factory, metrics);
-        self.handlers.insert(T::ID, Box::new(handler));
+        self.handlers.0.insert(T::ID, Box::new(handler));
         self
     }
 
@@ -217,7 +218,7 @@ impl ServerBuilder {
     {
         let logger = self.logger.new(o!("server" => self.bind_addr.to_string()));
         info!(logger, "Starts RPC server");
-        let handlers = mem::replace(&mut self.handlers, HashMap::new());
+        let handlers = mem::replace(&mut self.handlers, MessageHandlers(HashMap::new()));
         Server {
             listener: Listener::Binding(TcpListener::bind(self.bind_addr)),
             logger,

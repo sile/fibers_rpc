@@ -14,7 +14,12 @@ use message::{
 use metrics::HandlerMetrics;
 use {Call, Cast, ErrorKind, ProcedureId, Result};
 
-pub type MessageHandlers = HashMap<ProcedureId, Box<MessageHandlerFactory>>;
+pub struct MessageHandlers(pub HashMap<ProcedureId, Box<MessageHandlerFactory>>);
+impl fmt::Debug for MessageHandlers {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "MessageHandlers(_)")
+    }
+}
 
 /// This trait allows for handling notification RPC.
 pub trait HandleCast<T: Cast>: Send + Sync + 'static {
@@ -152,7 +157,7 @@ pub struct Assigner {
 }
 impl Assigner {
     pub fn new(mut handlers: MessageHandlers) -> Self {
-        handlers.shrink_to_fit();
+        handlers.0.shrink_to_fit();
         Assigner {
             handlers: Arc::new(handlers),
         }
@@ -163,7 +168,7 @@ impl AssignIncomingMessageHandler for Assigner {
 
     fn assign_incoming_message_handler(&mut self, header: &MessageHeader) -> Result<Self::Handler> {
         let factory = track_assert_some!(
-            self.handlers.get(&header.procedure),
+            self.handlers.0.get(&header.procedure),
             ErrorKind::InvalidInput,
             "Unregistered RPC: {:?}",
             header.procedure,
@@ -174,7 +179,7 @@ impl AssignIncomingMessageHandler for Assigner {
 }
 impl fmt::Debug for Assigner {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Assigner {{ handlers.len: {} }}", self.handlers.len(),)
+        write!(f, "Assigner {{ handlers.len: {} }}", self.handlers.0.len(),)
     }
 }
 impl Clone for Assigner {
