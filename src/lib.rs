@@ -133,8 +133,13 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// The identifier of a procedure.
 ///
 /// This must be unique among procedures registered in an RPC server.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ProcedureId(pub u32);
+impl std::fmt::Debug for ProcedureId {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "ProcedureId(0x{:08x})", self.0)
+    }
+}
 
 /// Request/response RPC.
 pub trait Call: Sized + Send + Sync + 'static {
