@@ -7,6 +7,7 @@ use slog::{Discard, Logger};
 use std::collections::HashMap;
 use std::fmt;
 use std::net::SocketAddr;
+use std::sync::atomic::{self, AtomicBool};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -245,9 +246,19 @@ impl Channel {
         metrics: ClientMetrics,
     ) -> (Self, ChannelHandle) {
         let (message_tx, message_rx) = mpsc::channel();
-        let inner = ClientSideChannel::new(logger, server, options, metrics);
+        let is_server_down = Arc::new(AtomicBool::new(false));
+        let inner = ClientSideChannel::new(
+            logger,
+            server,
+            Arc::clone(&is_server_down),
+            options,
+            metrics,
+        );
         let channel = Channel { inner, message_rx };
-        let handle = ChannelHandle { message_tx };
+        let handle = ChannelHandle {
+            message_tx,
+            is_server_down,
+        };
         (channel, handle)
     }
 }
@@ -273,10 +284,15 @@ impl Future for Channel {
 #[derive(Debug, Clone)]
 struct ChannelHandle {
     message_tx: mpsc::Sender<Message>,
+    is_server_down: Arc<AtomicBool>,
 }
 impl ChannelHandle {
     pub fn send_message(&self, message: Message) -> bool {
-        self.message_tx.send(message).is_ok()
+        if !message.force_wakeup && self.is_server_down.load(atomic::Ordering::SeqCst) {
+            false
+        } else {
+            self.message_tx.send(message).is_ok()
+        }
     }
 }
 

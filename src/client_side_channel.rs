@@ -5,7 +5,9 @@ use futures::{Async, Future, Poll, Stream};
 use slog::Logger;
 use std::fmt;
 use std::net::SocketAddr;
+use std::sync::atomic::{self, AtomicBool};
 use std::sync::mpsc::RecvError;
+use std::sync::Arc;
 use std::time::Duration;
 use trackable::error::ErrorKindExt;
 
@@ -22,6 +24,7 @@ pub const DEFAULT_KEEP_ALIVE_TIMEOUT_SECS: u64 = 60 * 10;
 pub struct ClientSideChannel {
     logger: Logger,
     server: SocketAddr,
+    is_server_down: Arc<AtomicBool>,
     keep_alive: KeepAlive,
     next_message_id: MessageId,
     message_stream: MessageStreamState,
@@ -33,12 +36,14 @@ impl ClientSideChannel {
     pub fn new(
         logger: Logger,
         server: SocketAddr,
+        is_server_down: Arc<AtomicBool>,
         options: ChannelOptions,
         metrics: ClientMetrics,
     ) -> Self {
         ClientSideChannel {
             logger,
             server,
+            is_server_down,
             keep_alive: KeepAlive::new(Duration::from_secs(DEFAULT_KEEP_ALIVE_TIMEOUT_SECS)),
             next_message_id: MessageId(0),
             message_stream: MessageStreamState::new(server, &options),
@@ -58,7 +63,9 @@ impl ClientSideChannel {
         response_handler: Option<BoxResponseHandler>,
     ) {
         message.header.id = self.next_message_id.next();
-        self.message_stream.send_message(message, response_handler);
+        if !self.message_stream.send_message(message, response_handler) {
+            self.metrics.discarded_outgoing_messages.increment();
+        }
     }
 
     pub fn force_wakeup(&mut self) {
@@ -69,8 +76,17 @@ impl ClientSideChannel {
                 buffer: Vec::new(),
                 future: tcp_connect(self.server, &self.options),
             };
-            self.message_stream = next;
+            self.update_message_stream_state(next);
         }
+    }
+
+    fn update_message_stream_state(&mut self, next: MessageStreamState) {
+        if let MessageStreamState::Wait { .. } = next {
+            self.is_server_down.store(true, atomic::Ordering::SeqCst);
+        } else {
+            self.is_server_down.store(false, atomic::Ordering::SeqCst);
+        };
+        self.message_stream = next;
     }
 
     fn wait_or_reconnect(
@@ -191,7 +207,7 @@ impl Future for ClientSideChannel {
         let mut count = 0;
         while let Async::Ready(next) = track!(self.poll_message_stream())? {
             if let Some(next) = next {
-                self.message_stream = next;
+                self.update_message_stream_state(next);
             }
 
             count += 1;
@@ -239,7 +255,11 @@ impl MessageStreamState {
         }
     }
 
-    fn send_message(&mut self, message: OutgoingMessage, handler: Option<BoxResponseHandler>) {
+    fn send_message(
+        &mut self,
+        message: OutgoingMessage,
+        handler: Option<BoxResponseHandler>,
+    ) -> bool {
         match *self {
             MessageStreamState::Wait { .. } => {
                 if let Some(mut handler) = handler {
@@ -247,9 +267,11 @@ impl MessageStreamState {
                         .cause("TCP stream disconnected (waiting for reconnecting)");
                     handler.handle_error(track!(e).into());
                 }
+                false
             }
             MessageStreamState::Connecting { ref mut buffer, .. } => {
                 buffer.push(BufferedMessage { message, handler });
+                true
             }
             MessageStreamState::Connected { ref mut stream } => {
                 let message_id = message.header.id;
@@ -259,6 +281,7 @@ impl MessageStreamState {
                         .assigner_mut()
                         .register_response_handler(message_id, handler);
                 }
+                true
             }
         }
     }

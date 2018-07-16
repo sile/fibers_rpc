@@ -212,7 +212,7 @@ pub struct Options {
 
     /// If it is `true`, RPC channel waiting for reconnecting will wake up immediately.
     ///
-    /// The defaul value is `false`.
+    /// The default value is `false`.
     pub force_wakeup: bool,
 }
 impl Options {
