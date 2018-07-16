@@ -115,7 +115,7 @@ impl ClientSideChannel {
                 ref mut buffer,
             } => match track!(future.poll().map_err(Error::from)) {
                 Err(e) => {
-                    error!(self.logger, "Failed to TCP connect: {}", e);
+                    warn!(self.logger, "Failed to TCP connect: {}", e);
                     self.metrics
                         .discarded_outgoing_messages
                         .add_u64(buffer.len() as u64);
