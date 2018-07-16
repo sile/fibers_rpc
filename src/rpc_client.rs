@@ -82,7 +82,7 @@ impl<'a, T: Cast> CastClient<'a, T> {
     }
 
     /// Returns a mutable reference to the encoder of this client.
-    pub fn encoder_mu(&mut self) -> &mut T::Encoder {
+    pub fn encoder_mut(&mut self) -> &mut T::Encoder {
         &mut self.encoder
     }
 }
