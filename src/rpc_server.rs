@@ -255,7 +255,7 @@ where
     type Error = Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        if let Async::Ready(item) = track!(self.listener.poll())? {
+        while let Async::Ready(item) = track!(self.listener.poll())? {
             if let Some((client, addr)) = item {
                 let logger = self.logger.new(o!("client" => addr.to_string()));
                 info!(logger, "New TCP client");
