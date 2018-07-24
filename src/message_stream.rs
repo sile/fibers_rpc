@@ -4,8 +4,9 @@ use bytecodec::io::{IoDecodeExt, IoEncodeExt, ReadBuf, WriteBuf};
 use bytecodec::{Decode, DecodeExt, Encode, EncodeExt, Eos};
 use fibers::net::TcpStream;
 use fibers::sync::mpsc;
+use fibers::time::timer::{self, Timeout};
 use fibers_tasque::DefaultCpuTaskQueue;
-use futures::{Async, Poll, Stream};
+use futures::{Async, Future, Poll, Stream};
 use std::cmp;
 use std::collections::{BinaryHeap, HashMap};
 use std::fmt;
@@ -32,6 +33,8 @@ pub struct MessageStream<A: AssignIncomingMessageHandler> {
     seqno: u64,
     options: ChannelOptions,
     metrics: ChannelMetrics,
+    write_timeout: Option<Timeout>,
+    is_written: bool,
 }
 impl<A: AssignIncomingMessageHandler> MessageStream<A>
 where
@@ -62,6 +65,8 @@ where
             seqno: 0,
             options,
             metrics,
+            write_timeout: None,
+            is_written: false,
         }
     }
 
@@ -131,7 +136,11 @@ where
                 }
             }
 
+            let old_len = self.wbuf.len();
             track!(self.wbuf.flush(&mut self.transport_stream))?;
+            if self.wbuf.len() < old_len {
+                self.is_written = true;
+            }
             if !self.wbuf.stream_state().is_normal() {
                 break;
             }
@@ -241,6 +250,27 @@ where
         }
         Ok(None)
     }
+
+    fn check_write_timeout(&mut self) -> Result<()> {
+        loop {
+            if self.write_timeout.is_none() && !self.wbuf.is_empty() {
+                self.write_timeout = Some(timer::timeout(self.options.tcp_write_timeout));
+                self.is_written = false;
+            }
+            if let Ok(Async::Ready(Some(()))) = self.write_timeout.poll() {
+                self.write_timeout = None;
+                track_assert!(
+                    self.is_written,
+                    ErrorKind::Timeout,
+                    "No data written in the duration {:?}",
+                    self.options.tcp_write_timeout
+                );
+                continue;
+            }
+            break;
+        }
+        Ok(())
+    }
 }
 impl<A: AssignIncomingMessageHandler> Stream for MessageStream<A>
 where
@@ -250,6 +280,8 @@ where
     type Error = Error;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
+        track!(self.check_write_timeout())?;
+
         while let Async::Ready(Some(message)) = self.async_outgoing_rx.poll().expect("Never fails")
         {
             self.start_sending_message(track!(message)?);

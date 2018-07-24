@@ -24,6 +24,9 @@ pub struct ChannelOptions {
 
     /// TCP connect timeout duration.
     pub tcp_connect_timeout: Duration,
+
+    /// Timeout duration of a write operation.
+    pub tcp_write_timeout: Duration,
 }
 impl ChannelOptions {
     /// The default value of `read_buffer_size` field.
@@ -40,6 +43,9 @@ impl ChannelOptions {
 
     /// The default duration of `tcp_connect_timeout` field.
     pub const DEFAULT_TCP_CONNECT_TIMEOUT_SECONDS: u64 = 5;
+
+    /// The default duration of `tcp_write_timeout` field.
+    pub const DEFAULT_TCP_WRITE_TIMEOUT_SECONDS: u64 = 5;
 }
 impl Default for ChannelOptions {
     fn default() -> Self {
@@ -49,6 +55,7 @@ impl Default for ChannelOptions {
             max_transmit_queue_len: Self::DEFAULT_MAX_TRANSMIT_QUEUE_LEN,
             yield_threshold: Self::DEFAULT_YIELD_THRESHOLD,
             tcp_connect_timeout: Duration::from_secs(Self::DEFAULT_TCP_CONNECT_TIMEOUT_SECONDS),
+            tcp_write_timeout: Duration::from_secs(Self::DEFAULT_TCP_WRITE_TIMEOUT_SECONDS),
         }
     }
 }
