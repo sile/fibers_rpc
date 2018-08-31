@@ -22,6 +22,12 @@
 //! [serde]: https://crates.io/crates/serde
 //! [Prometheus]: https://prometheus.io/
 //!
+//! # Technical Details
+//!
+//! See [doc/].
+//!
+//! [doc/]: https://github.com/sile/fibers_rpc/tree/master/doc
+//!
 //! # Examples
 //!
 //! Simple echo RPC server:
