@@ -67,7 +67,7 @@ of other RPC messages sharing the same TCP connection.
 ```
 
 - **Message Identifier (64 bits)**, **Procedure Identifier (32 bits)**, **Priority (8 bits)**:
-  - See: [Message Format](#Message-Format)
+  - See: [Message Format](#message-format)
 - **Flags (8 bits)**:
   - `END_OF_MESSAGE_FLAG (mask=0b0000_0001)`:
     - If the bit is set, it indicates that it is the last packet needed for reconstructing a message.
