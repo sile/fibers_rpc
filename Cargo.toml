@@ -1,12 +1,13 @@
 [package]
 name = "fibers_rpc"
-version = "0.2.15"
+version = "0.2.16"
 authors = ["Takeru Ohta <phjgt308@gmail.com>"]
 description = "RPC library built on top of fibers crate"
 homepage = "https://github.com/sile/fibers_rpc"
 repository = "https://github.com/sile/fibers_rpc"
 readme = "README.md"
 keywords = ["rpc", "fibers"]
+categories = ["network-programming", "asynchronous"]
 license = "MIT"
 
 [badges]
