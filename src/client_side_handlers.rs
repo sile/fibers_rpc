@@ -43,7 +43,8 @@ impl<T> Future for Response<T> {
         if let Async::Ready(item) = item {
             Ok(Async::Ready(item))
         } else {
-            let expired = self.timeout
+            let expired = self
+                .timeout
                 .poll()
                 .map_err(|_| track!(ErrorKind::Other.cause("Broken timer")))?;
             if let Async::Ready(Some(())) = expired {

@@ -162,7 +162,8 @@ where
                 )?;
                 if let Some(header) = self.packet_header_decoder.peek().cloned() {
                     if header.is_async() {
-                        let decoder = self.async_incomings
+                        let decoder = self
+                            .async_incomings
                             .entry(header.message.id)
                             .or_insert_with(Default::default);
                         decoder.set_consumable_bytes(u64::from(header.payload_len));
@@ -175,7 +176,8 @@ where
                             self.receiving_messages
                                 .insert(header.message.id, handler.slice());
                         }
-                        let handler = self.receiving_messages
+                        let handler = self
+                            .receiving_messages
                             .get_mut(&header.message.id)
                             .expect("Never fails");
                         handler.set_consumable_bytes(u64::from(header.payload_len));
@@ -185,7 +187,8 @@ where
 
             if let Some(header) = self.packet_header_decoder.peek().cloned() {
                 if header.is_async() {
-                    let mut decoder = self.async_incomings
+                    let mut decoder = self
+                        .async_incomings
                         .remove(&header.message.id)
                         .expect("Never fails");
 
@@ -220,7 +223,8 @@ where
                         self.async_incomings.insert(header.message.id, decoder);
                     }
                 } else {
-                    let mut handler = self.receiving_messages
+                    let mut handler = self
+                        .receiving_messages
                         .remove(&header.message.id)
                         .expect("Never fails");
 

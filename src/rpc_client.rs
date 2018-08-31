@@ -33,7 +33,8 @@ where
 
     /// Sends the notification message to the RPC server.
     pub fn cast(self, server: SocketAddr, notification: T::Notification) -> Result<()> {
-        if !self.options
+        if !self
+            .options
             .is_allowable_queue_len(&self.service.metrics, server)
         {
             self.service.metrics.discarded_outgoing_messages.increment();
@@ -114,7 +115,8 @@ impl<'a, T: Call> CallClient<'a, T> {
     /// Sends the request message to the RPC server,
     /// and returns a future that represents the response from the server.
     pub fn call(self, server: SocketAddr, request: T::Req) -> Response<T::Res> {
-        if !self.options
+        if !self
+            .options
             .is_allowable_queue_len(&self.service.metrics, server)
         {
             self.service.metrics.discarded_outgoing_messages.increment();
