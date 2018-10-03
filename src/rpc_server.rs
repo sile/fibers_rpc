@@ -3,7 +3,7 @@ use factory::{DefaultFactory, Factory};
 use fibers::net::futures::{Connected, TcpListenerBind};
 use fibers::net::streams::Incoming;
 use fibers::net::TcpListener;
-use fibers::sync::mpsc;
+use fibers::sync::{mpsc, oneshot};
 use fibers::{BoxSpawn, Spawn};
 use futures::{Async, Future, Poll, Stream};
 use prometrics::metrics::MetricBuilder;
@@ -220,7 +220,7 @@ impl ServerBuilder {
         info!(logger, "Starts RPC server");
         let handlers = mem::replace(&mut self.handlers, MessageHandlers(HashMap::new()));
         Server {
-            listener: Listener::Binding(TcpListener::bind(self.bind_addr)),
+            listener: Listener::Binding(TcpListener::bind(self.bind_addr), Vec::new()),
             logger,
             spawner,
             assigner: Assigner::new(handlers),
@@ -242,6 +242,11 @@ pub struct Server<S> {
     metrics: ServerMetrics,
 }
 impl<S> Server<S> {
+    /// Returns a future that retrieves the address to which the server is bound.
+    pub fn local_addr(&mut self) -> impl Future<Item = SocketAddr, Error = Error> {
+        self.listener.local_addr()
+    }
+
     /// Returns the metrics of the server.
     pub fn metrics(&self) -> &ServerMetrics {
         &self.metrics
@@ -360,8 +365,22 @@ impl Future for ChannelHandler {
 
 #[derive(Debug)]
 enum Listener {
-    Binding(TcpListenerBind),
-    Listening(Incoming),
+    Binding(TcpListenerBind, Vec<oneshot::Monitored<SocketAddr, Error>>),
+    Listening(Incoming, SocketAddr),
+}
+impl Listener {
+    fn local_addr(&mut self) -> impl Future<Item = SocketAddr, Error = Error> {
+        let (monitored, monitor) = oneshot::monitor();
+        match self {
+            Listener::Binding(_, waitings) => {
+                waitings.push(monitored);
+            }
+            Listener::Listening(_, addr) => {
+                monitored.exit(Ok(*addr));
+            }
+        }
+        monitor.map_err(|e| track!(Error::from(e)))
+    }
 }
 impl Stream for Listener {
     type Item = (Connected, SocketAddr);
@@ -369,15 +388,19 @@ impl Stream for Listener {
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
         loop {
-            let next = match *self {
-                Listener::Binding(ref mut f) => {
+            let next = match self {
+                Listener::Binding(f, waitings) => {
                     if let Async::Ready(listener) = track!(f.poll().map_err(Error::from))? {
-                        Listener::Listening(listener.incoming())
+                        let addr = track!(listener.local_addr().map_err(Error::from))?;
+                        for w in waitings.drain(..) {
+                            w.exit(Ok(addr));
+                        }
+                        Listener::Listening(listener.incoming(), addr)
                     } else {
                         break;
                     }
                 }
-                Listener::Listening(ref mut s) => return track!(s.poll().map_err(Error::from)),
+                Listener::Listening(s, _) => return track!(s.poll().map_err(Error::from)),
             };
             *self = next;
         }
