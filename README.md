@@ -44,11 +44,10 @@ Examples
 
 Simple echo RPC server:
 ```rust
-use fibers::{Executor, InPlaceExecutor, Spawn};
+use bytecodec::bytes::{BytesEncoder, RemainingBytesDecoder};
 use fibers_rpc::{Call, ProcedureId};
-use fibers_rpc::client::RpcClientServiceBuilder;
-use fibers_rpc::codec::BytesEncoder;
-use fibers_rpc::server::{HandleCall, Reply, RpcServerBuilder};
+use fibers_rpc::client::ClientServiceBuilder;
+use fibers_rpc::server::{HandleCall, Reply, ServerBuilder};
 use futures::Future;
 
 // RPC definition
@@ -59,15 +58,12 @@ impl Call for EchoRpc {
 
     type Req = Vec<u8>;
     type ReqEncoder = BytesEncoder<Vec<u8>>;
-    type ReqDecoder = Vec<u8>;
+    type ReqDecoder = RemainingBytesDecoder;
 
     type Res = Vec<u8>;
     type ResEncoder = BytesEncoder<Vec<u8>>;
-    type ResDecoder = Vec<u8>;
+    type ResDecoder = RemainingBytesDecoder;
 }
-
-// Executor
-let mut executor = InPlaceExecutor::new().unwrap();
 
 // RPC server
 struct EchoHandler;
@@ -77,20 +73,20 @@ impl HandleCall<EchoRpc> for EchoHandler {
     }
 }
 let server_addr = "127.0.0.1:1919".parse().unwrap();
-let server = RpcServerBuilder::new(server_addr)
+let server = ServerBuilder::new(server_addr)
     .add_call_handler(EchoHandler)
-    .finish(executor.handle());
-executor.spawn(server.map_err(|e| panic!("{}", e)));
+    .finish(fibers_global::handle());
+fibers_global::spawn(server.map_err(|e| panic!("{}", e)));
 
 // RPC client
-let service = RpcClientServiceBuilder::new().finish(executor.handle());
+let service = ClientServiceBuilder::new().finish(fibers_global::handle());
+let service_handle = service.handle();
+fibers_global::spawn(service.map_err(|e| panic!("{}", e)));
 
 let request = Vec::from(&b"hello"[..]);
-let response = EchoRpc::client(&service.handle()).call(server_addr, request.clone());
-
-executor.spawn(service.map_err(|e| panic!("{}", e)));
-let result = executor.run_future(response).unwrap();
-assert_eq!(result.ok(), Some(request));
+let response = EchoRpc::client(&service_handle).call(server_addr, request.clone());
+let response = fibers_global::execute(response)?;
+assert_eq!(response, request);
 ```
 
 Informal benchmark result (v0.2.1):
