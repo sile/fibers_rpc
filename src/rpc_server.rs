@@ -3,9 +3,10 @@ use factory::{DefaultFactory, Factory};
 use fibers::net::futures::{Connected, TcpListenerBind};
 use fibers::net::streams::Incoming;
 use fibers::net::TcpListener;
-use fibers::sync::{mpsc, oneshot};
-use fibers::{BoxSpawn, Spawn};
-use futures::{Async, Future, Poll, Stream};
+use fibers::sync::mpsc;
+use fibers::{self, BoxSpawn, Spawn};
+use futures::future::{loop_fn, Either, Loop};
+use futures::{self, Async, Future, Poll, Stream};
 use prometrics::metrics::MetricBuilder;
 use slog::{Discard, Logger};
 use std::collections::HashMap;
@@ -220,7 +221,7 @@ impl ServerBuilder {
         info!(logger, "Starts RPC server");
         let handlers = mem::replace(&mut self.handlers, MessageHandlers(HashMap::new()));
         Server {
-            listener: Listener::Binding(TcpListener::bind(self.bind_addr), Vec::new()),
+            listener: Listener::Binding(TcpListener::bind(self.bind_addr)),
             logger,
             spawner,
             assigner: Assigner::new(handlers),
@@ -243,8 +244,25 @@ pub struct Server<S> {
 }
 impl<S> Server<S> {
     /// Returns a future that retrieves the address to which the server is bound.
-    pub fn local_addr(&mut self) -> impl Future<Item = SocketAddr, Error = Error> {
-        self.listener.local_addr()
+    pub fn local_addr(self) -> impl Future<Item = (Self, SocketAddr), Error = Error> {
+        match self.listener {
+            Listener::Listening(_, addr) => Either::A(futures::finished((self, addr))),
+            Listener::Binding(_) => {
+                let future = loop_fn(self, |mut this| {
+                    if fibers::fiber::with_current_context(|_| ()).is_none() {
+                        return Ok(Loop::Continue(this));
+                    }
+
+                    track!(this.listener.poll())?;
+                    if let Listener::Listening(_, addr) = this.listener {
+                        Ok(Loop::Break((this, addr)))
+                    } else {
+                        Ok(Loop::Continue(this))
+                    }
+                });
+                Either::B(future)
+            }
+        }
     }
 
     /// Returns the metrics of the server.
@@ -365,22 +383,8 @@ impl Future for ChannelHandler {
 
 #[derive(Debug)]
 enum Listener {
-    Binding(TcpListenerBind, Vec<oneshot::Monitored<SocketAddr, Error>>),
+    Binding(TcpListenerBind),
     Listening(Incoming, SocketAddr),
-}
-impl Listener {
-    fn local_addr(&mut self) -> impl Future<Item = SocketAddr, Error = Error> {
-        let (monitored, monitor) = oneshot::monitor();
-        match self {
-            Listener::Binding(_, waitings) => {
-                waitings.push(monitored);
-            }
-            Listener::Listening(_, addr) => {
-                monitored.exit(Ok(*addr));
-            }
-        }
-        monitor.map_err(|e| track!(Error::from(e)))
-    }
 }
 impl Stream for Listener {
     type Item = (Connected, SocketAddr);
@@ -389,12 +393,9 @@ impl Stream for Listener {
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
         loop {
             let next = match self {
-                Listener::Binding(f, waitings) => {
+                Listener::Binding(f) => {
                     if let Async::Ready(listener) = track!(f.poll().map_err(Error::from))? {
                         let addr = track!(listener.local_addr().map_err(Error::from))?;
-                        for w in waitings.drain(..) {
-                            w.exit(Ok(addr));
-                        }
                         Listener::Listening(listener.incoming(), addr)
                     } else {
                         break;
