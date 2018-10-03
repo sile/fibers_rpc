@@ -51,15 +51,13 @@ fn main() {
                 .long("addr")
                 .takes_value(true)
                 .default_value("127.0.0.1:4567"),
-        )
-        .arg(
+        ).arg(
             Arg::with_name("LOG_LEVEL")
                 .long("log-level")
                 .takes_value(true)
                 .default_value("debug")
                 .possible_values(&["debug", "info", "warning", "error"]),
-        )
-        .subcommand(SubCommand::with_name("server"))
+        ).subcommand(SubCommand::with_name("server"))
         .subcommand(
             SubCommand::with_name("client")
                 .arg(
@@ -67,15 +65,13 @@ fn main() {
                         .long("timeout")
                         .takes_value(true)
                         .default_value("5000"),
-                )
-                .arg(
+                ).arg(
                     Arg::with_name("REPEAT")
                         .long("repeat")
                         .takes_value(true)
                         .default_value("1"),
                 ),
-        )
-        .subcommand(
+        ).subcommand(
             SubCommand::with_name("bench")
                 .arg(
                     Arg::with_name("CONCURRENCY")
@@ -83,29 +79,24 @@ fn main() {
                         .short("c")
                         .takes_value(true)
                         .default_value("256"),
-                )
-                .arg(
+                ).arg(
                     Arg::with_name("REQUESTS")
                         .long("requests")
                         .short("n")
                         .takes_value(true)
                         .default_value("1000"),
-                )
-                .arg(
+                ).arg(
                     Arg::with_name("MAX_QUEUE_LEN")
                         .long("max-queue-len")
                         .takes_value(true)
                         .default_value("10000"),
-                )
-                .arg(
+                ).arg(
                     Arg::with_name("PRIORITY")
                         .long("priority")
                         .takes_value(true)
                         .default_value("128"),
-                )
-                .arg(Arg::with_name("SHOW_METRICS").long("show-metrics")),
-        )
-        .get_matches();
+                ).arg(Arg::with_name("SHOW_METRICS").long("show-metrics")),
+        ).get_matches();
 
     let addr = track_try_unwrap!(
         matches
