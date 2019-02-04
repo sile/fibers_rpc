@@ -1,6 +1,6 @@
 [package]
 name = "fibers_rpc"
-version = "0.2.17"
+version = "0.2.18"
 authors = ["Takeru Ohta <phjgt308@gmail.com>"]
 description = "RPC library built on top of fibers crate"
 homepage = "https://github.com/sile/fibers_rpc"
