@@ -227,7 +227,7 @@ impl Drop for ClientSideChannel {
     }
 }
 
-#[cfg_attr(feature = "cargo-clippy", allow(large_enum_variant))]
+#[allow(clippy::large_enum_variant)]
 enum MessageStreamState {
     Wait {
         timeout: Timeout,

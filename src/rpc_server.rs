@@ -265,6 +265,21 @@ impl<S> Server<S> {
         }
     }
 
+    /// Polls the address to which the server is bound.
+    pub fn poll_local_addr(&mut self) -> Poll<SocketAddr, Error> {
+        match self.listener {
+            Listener::Listening(_, addr) => Ok(Async::Ready(addr)),
+            Listener::Binding(_) => {
+                track!(self.listener.poll())?;
+                if let Listener::Listening(_, addr) = self.listener {
+                    Ok(Async::Ready(addr))
+                } else {
+                    Ok(Async::NotReady)
+                }
+            }
+        }
+    }
+
     /// Returns the metrics of the server.
     pub fn metrics(&self) -> &ServerMetrics {
         &self.metrics
