@@ -34,11 +34,9 @@ impl<T> Future for Response<T> {
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         let item = self.reply_rx.poll().map_err(|e| {
-            track!(e.unwrap_or_else(|| {
-                ErrorKind::Other
-                    .cause("RPC response monitoring channel disconnected")
-                    .into()
-            }))
+            track!(e.unwrap_or_else(|| ErrorKind::Other
+                .cause("RPC response monitoring channel disconnected")
+                .into()))
         })?;
         if let Async::Ready(item) = item {
             Ok(Async::Ready(item))

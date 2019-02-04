@@ -156,10 +156,9 @@ where
             track!(self.rbuf.fill(&mut self.transport_stream))?;
 
             if !self.packet_header_decoder.is_idle() {
-                track!(
-                    self.packet_header_decoder
-                        .decode_from_read_buf(&mut self.rbuf)
-                )?;
+                track!(self
+                    .packet_header_decoder
+                    .decode_from_read_buf(&mut self.rbuf))?;
                 if let Some(header) = self.packet_header_decoder.peek().cloned() {
                     if header.is_async() {
                         let decoder = self
@@ -169,10 +168,9 @@ where
                         decoder.set_consumable_bytes(u64::from(header.payload_len));
                     } else {
                         if !self.receiving_messages.contains_key(&header.message.id) {
-                            let handler = track!(
-                                self.assigner
-                                    .assign_incoming_message_handler(&header.message)
-                            )?;
+                            let handler = track!(self
+                                .assigner
+                                .assign_incoming_message_handler(&header.message))?;
                             self.receiving_messages
                                 .insert(header.message.id, handler.slice());
                         }
@@ -204,10 +202,9 @@ where
                         self.metrics.async_incoming_messages.increment();
 
                         let tx = self.async_incoming_tx.clone();
-                        let mut handler = track!(
-                            self.assigner
-                                .assign_incoming_message_handler(&header.message)
-                        )?;
+                        let mut handler = track!(self
+                            .assigner
+                            .assign_incoming_message_handler(&header.message))?;
                         DefaultCpuTaskQueue.with(|tasque| {
                             tasque.enqueue(move || {
                                 let mut f = || {

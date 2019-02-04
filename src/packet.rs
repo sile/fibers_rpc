@@ -95,11 +95,10 @@ impl Encode for PacketizedMessage {
         debug_assert!(buf.len() >= PacketHeader::SIZE);
 
         let limit = cmp::min(buf.len() - PacketHeader::SIZE, MAX_PAYLOAD_LEN);
-        let payload_len = track!(
-            self.message
-                .payload
-                .encode(&mut buf[PacketHeader::SIZE..][..limit], eos)
-        )?;
+        let payload_len = track!(self
+            .message
+            .payload
+            .encode(&mut buf[PacketHeader::SIZE..][..limit], eos))?;
 
         let flags = (self.message.payload.is_idle() as u8 * FLAG_END_OF_MESSAGE)
             | (self.message.header.async as u8 * FLAG_ASYNC);

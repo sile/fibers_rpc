@@ -51,13 +51,15 @@ fn main() {
                 .long("addr")
                 .takes_value(true)
                 .default_value("127.0.0.1:4567"),
-        ).arg(
+        )
+        .arg(
             Arg::with_name("LOG_LEVEL")
                 .long("log-level")
                 .takes_value(true)
                 .default_value("debug")
                 .possible_values(&["debug", "info", "warning", "error"]),
-        ).subcommand(SubCommand::with_name("server"))
+        )
+        .subcommand(SubCommand::with_name("server"))
         .subcommand(
             SubCommand::with_name("client")
                 .arg(
@@ -65,13 +67,15 @@ fn main() {
                         .long("timeout")
                         .takes_value(true)
                         .default_value("5000"),
-                ).arg(
+                )
+                .arg(
                     Arg::with_name("REPEAT")
                         .long("repeat")
                         .takes_value(true)
                         .default_value("1"),
                 ),
-        ).subcommand(
+        )
+        .subcommand(
             SubCommand::with_name("bench")
                 .arg(
                     Arg::with_name("CONCURRENCY")
@@ -79,35 +83,38 @@ fn main() {
                         .short("c")
                         .takes_value(true)
                         .default_value("256"),
-                ).arg(
+                )
+                .arg(
                     Arg::with_name("REQUESTS")
                         .long("requests")
                         .short("n")
                         .takes_value(true)
                         .default_value("1000"),
-                ).arg(
+                )
+                .arg(
                     Arg::with_name("MAX_QUEUE_LEN")
                         .long("max-queue-len")
                         .takes_value(true)
                         .default_value("10000"),
-                ).arg(
+                )
+                .arg(
                     Arg::with_name("PRIORITY")
                         .long("priority")
                         .takes_value(true)
                         .default_value("128"),
-                ).arg(Arg::with_name("SHOW_METRICS").long("show-metrics")),
-        ).get_matches();
+                )
+                .arg(Arg::with_name("SHOW_METRICS").long("show-metrics")),
+        )
+        .get_matches();
 
-    let addr = track_try_unwrap!(
-        matches
-            .value_of("ADDRESS")
-            .unwrap()
-            .to_socket_addrs()
-            .map_err(Failure::from_error)
-            .and_then(|mut addrs| addrs
-                .next()
-                .ok_or_else(|| Failed.cause("No available address").into()))
-    );
+    let addr = track_try_unwrap!(matches
+        .value_of("ADDRESS")
+        .unwrap()
+        .to_socket_addrs()
+        .map_err(Failure::from_error)
+        .and_then(|mut addrs| addrs
+            .next()
+            .ok_or_else(|| Failed.cause("No available address").into())));
 
     let log_level: Severity = track_try_unwrap!(matches.value_of("LOG_LEVEL").unwrap().parse());
     let logger = track_try_unwrap!(TerminalLoggerBuilder::new().level(log_level).build());
@@ -123,9 +130,10 @@ fn main() {
         let _ = track_try_unwrap!(executor.run_fiber(fiber).map_err(Failure::from_error))
             .map_err(|e| panic!("{}", e));
     } else if let Some(matches) = matches.subcommand_matches("client") {
-        let timeout = Duration::from_millis(track_try_unwrap!(track_any_err!(
-            matches.value_of("TIMEOUT").unwrap().parse()
-        )));
+        let timeout = Duration::from_millis(track_try_unwrap!(track_any_err!(matches
+            .value_of("TIMEOUT")
+            .unwrap()
+            .parse())));
         let repeat: usize =
             track_try_unwrap!(track_any_err!(matches.value_of("REPEAT").unwrap().parse()));
 
@@ -136,11 +144,9 @@ fn main() {
         executor.spawn(service.map_err(|e| panic!("{}", e)));
 
         let mut buf = Vec::new();
-        track_try_unwrap!(
-            io::stdin()
-                .read_to_end(&mut buf)
-                .map_err(Failure::from_error)
-        );
+        track_try_unwrap!(io::stdin()
+            .read_to_end(&mut buf)
+            .map_err(Failure::from_error));
 
         for _ in 0..repeat {
             let mut client = EchoRpc::client(&client_service);
@@ -153,18 +159,22 @@ fn main() {
         }
         let _ = std::io::stdout().flush();
     } else if let Some(matches) = matches.subcommand_matches("bench") {
-        let concurrency: usize = track_try_unwrap!(track_any_err!(
-            matches.value_of("CONCURRENCY").unwrap().parse()
-        ));
-        let requests: usize = track_try_unwrap!(track_any_err!(
-            matches.value_of("REQUESTS").unwrap().parse()
-        ));
-        let max_queue_len: u64 = track_try_unwrap!(track_any_err!(
-            matches.value_of("MAX_QUEUE_LEN").unwrap().parse()
-        ));
-        let priority: u8 = track_try_unwrap!(track_any_err!(
-            matches.value_of("PRIORITY").unwrap().parse()
-        ));
+        let concurrency: usize = track_try_unwrap!(track_any_err!(matches
+            .value_of("CONCURRENCY")
+            .unwrap()
+            .parse()));
+        let requests: usize = track_try_unwrap!(track_any_err!(matches
+            .value_of("REQUESTS")
+            .unwrap()
+            .parse()));
+        let max_queue_len: u64 = track_try_unwrap!(track_any_err!(matches
+            .value_of("MAX_QUEUE_LEN")
+            .unwrap()
+            .parse()));
+        let priority: u8 = track_try_unwrap!(track_any_err!(matches
+            .value_of("PRIORITY")
+            .unwrap()
+            .parse()));
 
         let service = ClientServiceBuilder::new()
             .logger(logger)
@@ -173,11 +183,9 @@ fn main() {
         executor.spawn(service.map_err(|e| panic!("{}", e)));
 
         let mut buf = Vec::new();
-        track_try_unwrap!(
-            io::stdin()
-                .read_to_end(&mut buf)
-                .map_err(Failure::from_error)
-        );
+        track_try_unwrap!(io::stdin()
+            .read_to_end(&mut buf)
+            .map_err(Failure::from_error));
         let options = RpcOptions {
             max_queue_len: Some(max_queue_len),
             priority,
