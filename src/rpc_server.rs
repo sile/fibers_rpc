@@ -213,7 +213,7 @@ impl ServerBuilder {
     /// Returns the resulting RPC server.
     ///
     /// The invocation of this method consumes all registered handlers.
-    pub fn finish<S>(&mut self, spawner: S) -> Server<S>
+    pub fn finish<S>(mut self, spawner: S) -> Server<S>
     where
         S: Clone + Spawn + Send + 'static,
     {

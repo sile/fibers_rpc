@@ -122,10 +122,9 @@ fn main() {
     let mut executor = track_try_unwrap!(ThreadPoolExecutor::new().map_err(Failure::from_error));
 
     if let Some(_matches) = matches.subcommand_matches("server") {
-        let server = ServerBuilder::new(addr)
-            .logger(logger)
-            .add_call_handler(EchoHandler)
-            .finish(executor.handle());
+        let mut builder = ServerBuilder::new(addr);
+        builder.logger(logger).add_call_handler(EchoHandler);
+        let server = builder.finish(executor.handle());
         let fiber = executor.spawn_monitor(server);
         let _ = track_try_unwrap!(executor.run_fiber(fiber).map_err(Failure::from_error))
             .map_err(|e| panic!("{}", e));
@@ -137,9 +136,9 @@ fn main() {
         let repeat: usize =
             track_try_unwrap!(track_any_err!(matches.value_of("REPEAT").unwrap().parse()));
 
-        let service = ClientServiceBuilder::new()
-            .logger(logger)
-            .finish(executor.handle());
+        let mut builder = ClientServiceBuilder::new();
+        builder.logger(logger);
+        let service = builder.finish(executor.handle());
         let client_service = service.handle();
         executor.spawn(service.map_err(|e| panic!("{}", e)));
 
@@ -176,9 +175,9 @@ fn main() {
             .unwrap()
             .parse()));
 
-        let service = ClientServiceBuilder::new()
-            .logger(logger)
-            .finish(executor.handle());
+        let mut builder = ClientServiceBuilder::new();
+        builder.logger(logger);
+        let service = builder.finish(executor.handle());
         let client_service = service.handle();
         executor.spawn(service.map_err(|e| panic!("{}", e)));
 

@@ -68,9 +68,9 @@
 //!     }
 //! }
 //! let server_addr = "127.0.0.1:1919".parse().unwrap();
-//! let server = ServerBuilder::new(server_addr)
-//!     .add_call_handler(EchoHandler)
-//!     .finish(fibers_global::handle());
+//! let mut builder = ServerBuilder::new(server_addr);
+//! builder.add_call_handler(EchoHandler);
+//! let server = builder.finish(fibers_global::handle());
 //! fibers_global::spawn(server.map_err(|e| panic!("{}", e)));
 //!
 //! // RPC client
@@ -330,9 +330,9 @@ mod tests {
     #[test]
     fn it_works() -> TestResult {
         // Server
-        let server = ServerBuilder::new("127.0.0.1:0".parse().unwrap())
-            .add_call_handler(EchoHandler)
-            .finish(fibers_global::handle());
+        let mut builder = ServerBuilder::new("127.0.0.1:0".parse().unwrap());
+        builder.add_call_handler(EchoHandler);
+        let server = builder.finish(fibers_global::handle());
         let (server, server_addr) = track!(fibers_global::execute(server.local_addr()))?;
         fibers_global::spawn(server.map_err(|e| panic!("{}", e)));
 
@@ -362,9 +362,9 @@ mod tests {
     #[test]
     fn large_message_works() -> TestResult {
         // Server
-        let server = ServerBuilder::new("127.0.0.1:0".parse().unwrap())
-            .add_call_handler(EchoHandler)
-            .finish(fibers_global::handle());
+        let mut builder = ServerBuilder::new("127.0.0.1:0".parse().unwrap());
+        builder.add_call_handler(EchoHandler);
+        let server = builder.finish(fibers_global::handle());
         // let (server, server_addr) = track!(fibers_global::execute(server.local_addr()))?;
         let future = server.local_addr();
         let (server, server_addr) = track!(fibers_global::execute(future))?;
@@ -385,9 +385,9 @@ mod tests {
     #[test]
     fn async_works() -> TestResult {
         // Server
-        let server = ServerBuilder::new("127.0.0.1:0".parse().unwrap())
-            .add_call_handler(EchoHandler)
-            .finish(fibers_global::handle());
+        let mut builder = ServerBuilder::new("127.0.0.1:0".parse().unwrap());
+        builder.add_call_handler(EchoHandler);
+        let server = builder.finish(fibers_global::handle());
         let (server, server_addr) = track!(fibers_global::execute(server.local_addr()))?;
         fibers_global::spawn(server.map_err(|e| panic!("{}", e)));
 

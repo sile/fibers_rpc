@@ -73,7 +73,7 @@ impl ClientServiceBuilder {
     }
 
     /// Builds a new `ClientService` instance.
-    pub fn finish<S>(&self, spawner: S) -> ClientService
+    pub fn finish<S>(self, spawner: S) -> ClientService
     where
         S: Spawn + Send + 'static,
     {
