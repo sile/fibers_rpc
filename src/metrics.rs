@@ -1,6 +1,7 @@
 //! [Prometheus][prometheus] metrics.
 //!
 //! [prometheus]: https://prometheus.io/
+use crate::ProcedureId;
 use atomic_immut::AtomicImmut;
 use prometrics::metrics::{Counter, MetricBuilder};
 use std::collections::HashMap;
@@ -8,8 +9,6 @@ use std::net::SocketAddr;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
-
-use ProcedureId;
 
 /// Client side metrics.
 #[derive(Debug, Clone)]

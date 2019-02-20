@@ -1,3 +1,12 @@
+use crate::channel::ChannelOptions;
+use crate::message::OutgoingMessage;
+use crate::metrics::{HandlerMetrics, ServerMetrics};
+use crate::server_side_channel::ServerSideChannel;
+use crate::server_side_handlers::{
+    Action, Assigner, CallHandlerFactory, CastHandlerFactory, HandleCall, HandleCast,
+    MessageHandlers,
+};
+use crate::{Call, Cast, Error, ProcedureId};
 use bytecodec::marker::Never;
 use factory::{DefaultFactory, Factory};
 use fibers::net::futures::{Connected, TcpListenerBind};
@@ -12,16 +21,6 @@ use slog::{Discard, Logger};
 use std::collections::HashMap;
 use std::mem;
 use std::net::SocketAddr;
-
-use channel::ChannelOptions;
-use message::OutgoingMessage;
-use metrics::{HandlerMetrics, ServerMetrics};
-use server_side_channel::ServerSideChannel;
-use server_side_handlers::{
-    Action, Assigner, CallHandlerFactory, CastHandlerFactory, HandleCall, HandleCast,
-    MessageHandlers,
-};
-use {Call, Cast, Error, ProcedureId};
 
 /// RPC server builder.
 #[derive(Debug)]
@@ -211,8 +210,6 @@ impl ServerBuilder {
     }
 
     /// Returns the resulting RPC server.
-    ///
-    /// The invocation of this method consumes all registered handlers.
     pub fn finish<S>(mut self, spawner: S) -> Server<S>
     where
         S: Clone + Spawn + Send + 'static,

@@ -1,3 +1,10 @@
+use crate::channel::ChannelOptions;
+use crate::message::{
+    AssignIncomingMessageHandler, MessageId, OutgoingMessage, OutgoingMessagePayload,
+};
+use crate::metrics::ChannelMetrics;
+use crate::packet::{PacketHeaderDecoder, PacketizedMessage, MIN_PACKET_LEN};
+use crate::{Error, ErrorKind, Result};
 use bytecodec::bytes::{BytesEncoder, RemainingBytesDecoder};
 use bytecodec::combinator::{MaybeEos, Peekable, Slice};
 use bytecodec::io::{IoDecodeExt, IoEncodeExt, ReadBuf, WriteBuf};
@@ -10,12 +17,6 @@ use futures::{Async, Future, Poll, Stream};
 use std::cmp;
 use std::collections::{BinaryHeap, HashMap};
 use std::fmt;
-
-use channel::ChannelOptions;
-use message::{AssignIncomingMessageHandler, MessageId, OutgoingMessage, OutgoingMessagePayload};
-use metrics::ChannelMetrics;
-use packet::{PacketHeaderDecoder, PacketizedMessage, MIN_PACKET_LEN};
-use {Error, ErrorKind, Result};
 
 pub struct MessageStream<A: AssignIncomingMessageHandler> {
     transport_stream: TcpStream,
@@ -79,7 +80,7 @@ where
     }
 
     pub fn send_message(&mut self, mut message: OutgoingMessage) {
-        if message.header.async {
+        if message.header.is_async {
             self.metrics.async_outgoing_messages.increment();
             let tx = self.async_outgoing_tx.clone();
             DefaultCpuTaskQueue.with(|tasque| {

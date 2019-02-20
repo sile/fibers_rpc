@@ -1,16 +1,15 @@
+use crate::{ProcedureId, Result};
 use bytecodec::marker::Never;
 use bytecodec::{self, ByteCount, Decode, Encode, EncodeExt, Eos};
 use byteorder::{BigEndian, ByteOrder};
 use std::fmt;
-
-use {ProcedureId, Result};
 
 #[derive(Debug, Clone)]
 pub struct MessageHeader {
     pub id: MessageId,
     pub procedure: ProcedureId,
     pub priority: u8,
-    pub async: bool,
+    pub is_async: bool,
 }
 impl MessageHeader {
     pub const SIZE: usize = 8 + 4 + 1;
@@ -29,7 +28,7 @@ impl MessageHeader {
             id,
             procedure,
             priority,
-            async: false, // dummy
+            is_async: false, // dummy
         }
     }
 }

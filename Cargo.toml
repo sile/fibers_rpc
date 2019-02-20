@@ -9,6 +9,7 @@ readme = "README.md"
 keywords = ["rpc", "fibers"]
 categories = ["network-programming", "asynchronous"]
 license = "MIT"
+edition = "2018"
 
 [badges]
 travis-ci = {repository = "sile/fibers_rpc"}

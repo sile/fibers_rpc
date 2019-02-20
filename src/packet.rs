@@ -1,10 +1,9 @@
+use crate::message::{MessageHeader, OutgoingMessage};
 use bytecodec::bytes::CopyableBytesDecoder;
 use bytecodec::marker::Never;
 use bytecodec::{self, ByteCount, Decode, Encode, Eos};
 use byteorder::{BigEndian, ByteOrder};
 use std::cmp;
-
-use message::{MessageHeader, OutgoingMessage};
 
 pub const MIN_PACKET_LEN: usize = PacketHeader::SIZE;
 pub const MAX_PACKET_LEN: usize = PacketHeader::SIZE + MAX_PAYLOAD_LEN;
@@ -31,7 +30,7 @@ impl PacketHeader {
     fn read(buf: &[u8]) -> Self {
         let mut message = MessageHeader::read(buf);
         let flags = buf[MessageHeader::SIZE];
-        message.async = (flags & FLAG_ASYNC) != 0;
+        message.is_async = (flags & FLAG_ASYNC) != 0;
         let payload_len = BigEndian::read_u16(&buf[MessageHeader::SIZE + 1..]);
         PacketHeader {
             message,
@@ -101,7 +100,7 @@ impl Encode for PacketizedMessage {
             .encode(&mut buf[PacketHeader::SIZE..][..limit], eos))?;
 
         let flags = (self.message.payload.is_idle() as u8 * FLAG_END_OF_MESSAGE)
-            | (self.message.header.async as u8 * FLAG_ASYNC);
+            | (self.message.header.is_async as u8 * FLAG_ASYNC);
         let packet_header = PacketHeader {
             message: self.message.header.clone(),
             flags,

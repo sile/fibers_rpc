@@ -1,3 +1,9 @@
+use crate::channel::ChannelOptions;
+use crate::client_side_handlers::{Assigner, BoxResponseHandler};
+use crate::message::{MessageId, OutgoingMessage};
+use crate::message_stream::MessageStream;
+use crate::metrics::{ChannelMetrics, ClientMetrics};
+use crate::{Error, ErrorKind, Result};
 use fibers;
 use fibers::net::TcpStream;
 use fibers::time::timer::{self, Timeout, TimerExt};
@@ -10,13 +16,6 @@ use std::sync::mpsc::RecvError;
 use std::sync::Arc;
 use std::time::Duration;
 use trackable::error::ErrorKindExt;
-
-use channel::ChannelOptions;
-use client_side_handlers::{Assigner, BoxResponseHandler};
-use message::{MessageId, OutgoingMessage};
-use message_stream::MessageStream;
-use metrics::{ChannelMetrics, ClientMetrics};
-use {Error, ErrorKind, Result};
 
 pub const DEFAULT_KEEP_ALIVE_TIMEOUT_SECS: u64 = 60 * 10;
 

@@ -1,3 +1,6 @@
+use crate::message::{AssignIncomingMessageHandler, MessageHeader, MessageId};
+use crate::metrics::ClientMetrics;
+use crate::{Error, ErrorKind, Result};
 use bytecodec::{self, ByteCount, Decode, Eos};
 use fibers::sync::oneshot;
 use fibers::time::timer::{self, Timeout};
@@ -7,10 +10,6 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 use trackable::error::ErrorKindExt;
-
-use message::{AssignIncomingMessageHandler, MessageHeader, MessageId};
-use metrics::ClientMetrics;
-use {Error, ErrorKind, Result};
 
 /// `Future` that represents a response from a RPC server.
 #[derive(Debug)]

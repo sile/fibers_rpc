@@ -1,7 +1,6 @@
 //! RPC channel related components.
+use crate::packet::MAX_PACKET_LEN;
 use std::time::Duration;
-
-use packet::MAX_PACKET_LEN;
 
 /// Options for a RPC channel.
 #[derive(Debug, Clone)]

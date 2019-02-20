@@ -33,11 +33,6 @@
 //! Simple echo RPC server:
 //!
 //! ```
-//! # extern crate bytecodec;
-//! # extern crate fibers_global;
-//! # extern crate fibers_rpc;
-//! # extern crate futures;
-//! # extern crate trackable;
 //! # fn main() -> trackable::result::MainResult {
 //! use bytecodec::bytes::{BytesEncoder, RemainingBytesDecoder};
 //! use fibers_rpc::{Call, ProcedureId};
@@ -86,16 +81,6 @@
 //! # }
 //! ```
 #![warn(missing_docs)]
-extern crate atomic_immut;
-extern crate bytecodec;
-extern crate byteorder;
-extern crate factory;
-extern crate fibers;
-#[cfg(test)]
-extern crate fibers_global;
-extern crate fibers_tasque;
-extern crate futures;
-extern crate prometrics;
 #[macro_use]
 extern crate slog;
 #[macro_use]
@@ -106,20 +91,20 @@ pub use error::{Error, ErrorKind};
 pub mod client {
     //! RPC client.
 
-    pub use client_service::{ClientService, ClientServiceBuilder, ClientServiceHandle};
-    pub use client_side_handlers::Response;
-    pub use rpc_client::{CallClient, CastClient, Options};
+    pub use crate::client_service::{ClientService, ClientServiceBuilder, ClientServiceHandle};
+    pub use crate::client_side_handlers::Response;
+    pub use crate::rpc_client::{CallClient, CastClient, Options};
 }
 pub mod channel;
 pub mod metrics;
 pub mod server {
     //! RPC server.
 
-    pub use rpc_server::{Server, ServerBuilder};
-    pub use server_side_handlers::{HandleCall, HandleCast, NoReply, Reply};
+    pub use crate::rpc_server::{Server, ServerBuilder};
+    pub use crate::server_side_handlers::{HandleCall, HandleCast, NoReply, Reply};
 }
 
-use client::{CallClient, CastClient, ClientServiceHandle};
+use crate::client::{CallClient, CastClient, ClientServiceHandle};
 
 mod client_service;
 mod client_side_channel;
@@ -287,14 +272,13 @@ pub trait Cast: Sized + Sync + Send + 'static {
 
 #[cfg(test)]
 mod tests {
+    use crate::client::ClientServiceBuilder;
+    use crate::server::{HandleCall, Reply, ServerBuilder};
+    use crate::{Call, ProcedureId};
     use bytecodec::bytes::{BytesEncoder, RemainingBytesDecoder};
     use fibers_global;
     use futures::Future;
     use trackable::result::TestResult;
-
-    use client::ClientServiceBuilder;
-    use server::{HandleCall, Reply, ServerBuilder};
-    use {Call, ProcedureId};
 
     // RPC
     struct EchoRpc;

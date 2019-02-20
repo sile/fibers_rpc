@@ -1,14 +1,13 @@
+use crate::channel::ChannelOptions;
+use crate::message::OutgoingMessage;
+use crate::message_stream::{MessageEvent, MessageStream};
+use crate::metrics::ChannelMetrics;
+use crate::server_side_handlers::{Action, Assigner};
+use crate::Error;
 use fibers;
 use fibers::net::TcpStream;
 use futures::{Async, Poll, Stream};
 use slog::Logger;
-
-use channel::ChannelOptions;
-use message::OutgoingMessage;
-use message_stream::{MessageEvent, MessageStream};
-use metrics::ChannelMetrics;
-use server_side_handlers::{Action, Assigner};
-use Error;
 
 #[derive(Debug)]
 pub struct ServerSideChannel {

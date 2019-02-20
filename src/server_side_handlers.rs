@@ -1,3 +1,8 @@
+use crate::message::{
+    AssignIncomingMessageHandler, MessageHeader, OutgoingMessage, OutgoingMessagePayload,
+};
+use crate::metrics::HandlerMetrics;
+use crate::{Call, Cast, ErrorKind, ProcedureId, Result};
 use bytecodec::marker::Never;
 use bytecodec::{self, ByteCount, Decode, Eos};
 use factory::Factory;
@@ -7,12 +12,6 @@ use std::collections::HashMap;
 use std::fmt;
 use std::marker::PhantomData;
 use std::sync::Arc;
-
-use message::{
-    AssignIncomingMessageHandler, MessageHeader, OutgoingMessage, OutgoingMessagePayload,
-};
-use metrics::HandlerMetrics;
-use {Call, Cast, ErrorKind, ProcedureId, Result};
 
 pub struct MessageHandlers(pub HashMap<ProcedureId, Box<MessageHandlerFactory>>);
 impl fmt::Debug for MessageHandlers {
@@ -342,7 +341,7 @@ where
                                          T::NAME);
         let mut header = self.header.clone();
         let reply = self.handler.handle_call(request).boxed(move |v| {
-            header.async = T::enable_async_response(&v);
+            header.is_async = T::enable_async_response(&v);
             OutgoingMessage {
                 header,
                 payload: OutgoingMessagePayload::with_item(encoder, v),

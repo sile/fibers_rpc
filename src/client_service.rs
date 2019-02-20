@@ -1,3 +1,9 @@
+use crate::channel::ChannelOptions;
+use crate::client_side_channel::{ClientSideChannel, DEFAULT_KEEP_ALIVE_TIMEOUT_SECS};
+use crate::client_side_handlers::BoxResponseHandler;
+use crate::message::OutgoingMessage;
+use crate::metrics::ClientMetrics;
+use crate::Error;
 use atomic_immut::AtomicImmut;
 use fibers::sync::mpsc;
 use fibers::{BoxSpawn, Spawn};
@@ -10,13 +16,6 @@ use std::net::SocketAddr;
 use std::sync::atomic::{self, AtomicBool};
 use std::sync::Arc;
 use std::time::Duration;
-
-use channel::ChannelOptions;
-use client_side_channel::{ClientSideChannel, DEFAULT_KEEP_ALIVE_TIMEOUT_SECS};
-use client_side_handlers::BoxResponseHandler;
-use message::OutgoingMessage;
-use metrics::ClientMetrics;
-use Error;
 
 /// `ClientService` builder.
 #[derive(Debug)]

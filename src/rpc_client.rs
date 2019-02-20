@@ -1,14 +1,13 @@
+use crate::client_service::{ClientServiceHandle, Message};
+use crate::client_side_handlers::{Response, ResponseHandler};
+use crate::message::{MessageHeader, MessageId, OutgoingMessage, OutgoingMessagePayload};
+use crate::metrics::ClientMetrics;
+use crate::{Call, Cast, ErrorKind, Result};
 use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use trackable::error::ErrorKindExt;
-
-use client_service::{ClientServiceHandle, Message};
-use client_side_handlers::{Response, ResponseHandler};
-use message::{MessageHeader, MessageId, OutgoingMessage, OutgoingMessagePayload};
-use metrics::ClientMetrics;
-use {Call, Cast, ErrorKind, Result};
 
 /// Client for notification RPC.
 #[derive(Debug)]
@@ -46,7 +45,7 @@ where
             id: MessageId(0), // dummy
             procedure: T::ID,
             priority: self.options.priority,
-            async: T::enable_async(&notification),
+            is_async: T::enable_async(&notification),
         };
         let message = Message {
             message: OutgoingMessage {
@@ -128,7 +127,7 @@ impl<'a, T: Call> CallClient<'a, T> {
             id: MessageId(0), // dummy
             procedure: T::ID,
             priority: self.options.priority,
-            async: T::enable_async_request(&request),
+            is_async: T::enable_async_request(&request),
         };
 
         let (handler, response) = ResponseHandler::new(
