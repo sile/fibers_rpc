@@ -73,9 +73,9 @@ impl HandleCall<EchoRpc> for EchoHandler {
     }
 }
 let server_addr = "127.0.0.1:1919".parse().unwrap();
-let server = ServerBuilder::new(server_addr)
-    .add_call_handler(EchoHandler)
-    .finish(fibers_global::handle());
+let mut builder = ServerBuilder::new(server_addr);
+builder.add_call_handler(EchoHandler);
+let server = builder.finish(fibers_global::handle());
 fibers_global::spawn(server.map_err(|e| panic!("{}", e)));
 
 // RPC client
