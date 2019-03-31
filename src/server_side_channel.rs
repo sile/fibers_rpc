@@ -43,10 +43,10 @@ impl Stream for ServerSideChannel {
             if let Some(event) = item {
                 match event {
                     MessageEvent::Sent => {
-                        debug!(self.logger, "Completed to send a message");
+                        trace!(self.logger, "Completed to send a message");
                     }
                     MessageEvent::Received { next_action } => {
-                        debug!(self.logger, "Completed to receive a message");
+                        trace!(self.logger, "Completed to receive a message");
                         return Ok(Async::Ready(Some(next_action)));
                     }
                 }
