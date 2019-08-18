@@ -233,7 +233,7 @@ enum MessageStreamState {
     },
     Connecting {
         buffer: Vec<BufferedMessage>,
-        future: Box<Future<Item = TcpStream, Error = Error> + Send + 'static>,
+        future: Box<dyn Future<Item = TcpStream, Error = Error> + Send + 'static>,
     },
     Connected {
         stream: MessageStream<Assigner>,
@@ -386,7 +386,7 @@ fn from_timeout_error(_: RecvError) -> Error {
 fn tcp_connect(
     server: SocketAddr,
     options: &ChannelOptions,
-) -> Box<Future<Item = TcpStream, Error = Error> + Send + 'static> {
+) -> Box<dyn Future<Item = TcpStream, Error = Error> + Send + 'static> {
     let future = TcpStream::connect(server)
         .timeout_after(options.tcp_connect_timeout)
         .map_err(|e| {

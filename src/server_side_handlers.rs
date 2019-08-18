@@ -13,7 +13,7 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-pub struct MessageHandlers(pub HashMap<ProcedureId, Box<MessageHandlerFactory>>);
+pub struct MessageHandlers(pub HashMap<ProcedureId, Box<dyn MessageHandlerFactory>>);
 impl fmt::Debug for MessageHandlers {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "MessageHandlers(_)")
@@ -32,7 +32,7 @@ pub trait HandleCall<T: Call>: Send + Sync + 'static {
     fn handle_call(&self, request: T::Req) -> Reply<T>;
 }
 
-type BoxResponseFuture<T> = Box<Future<Item = T, Error = Never> + Send + 'static>;
+type BoxResponseFuture<T> = Box<dyn Future<Item = T, Error = Never> + Send + 'static>;
 
 /// This represents a reply from a RPC server.
 pub struct Reply<T: Call> {
@@ -79,7 +79,7 @@ impl<T: Call> fmt::Debug for Reply<T> {
 
 pub struct BoxReply {
     either: Either<
-        Box<Future<Item = OutgoingMessage, Error = Never> + Send + 'static>,
+        Box<dyn Future<Item = OutgoingMessage, Error = Never> + Send + 'static>,
         Option<OutgoingMessage>,
     >,
 }
@@ -111,7 +111,7 @@ impl fmt::Debug for BoxReply {
 
 /// This represents a task for handling an RPC notification.
 pub struct NoReply {
-    future: Option<Box<Future<Item = (), Error = Never> + Send + 'static>>,
+    future: Option<Box<dyn Future<Item = (), Error = Never> + Send + 'static>>,
 }
 impl NoReply {
     /// Makes a `NoReply` instance which will execute `future` for handling the notification.
@@ -131,7 +131,7 @@ impl NoReply {
 
     pub(crate) fn into_future(
         self,
-    ) -> Option<Box<Future<Item = (), Error = Never> + Send + 'static>> {
+    ) -> Option<Box<dyn Future<Item = (), Error = Never> + Send + 'static>> {
         self.future
     }
 }
@@ -163,7 +163,7 @@ impl Assigner {
     }
 }
 impl AssignIncomingMessageHandler for Assigner {
-    type Handler = Box<Decode<Item = Action> + Send + 'static>;
+    type Handler = Box<dyn Decode<Item = Action> + Send + 'static>;
 
     fn assign_incoming_message_handler(&mut self, header: &MessageHeader) -> Result<Self::Handler> {
         let factory = track_assert_some!(
@@ -193,7 +193,7 @@ pub trait MessageHandlerFactory: Send + Sync + 'static {
     fn create_message_handler(
         &self,
         header: &MessageHeader,
-    ) -> Box<Decode<Item = Action> + Send + 'static>;
+    ) -> Box<dyn Decode<Item = Action> + Send + 'static>;
 }
 
 pub struct CastHandlerFactory<T, H, D> {
@@ -226,7 +226,7 @@ where
     fn create_message_handler(
         &self,
         _header: &MessageHeader,
-    ) -> Box<Decode<Item = Action> + Send + 'static> {
+    ) -> Box<dyn Decode<Item = Action> + Send + 'static> {
         let decoder = self.decoder_maker.create();
         let handler = CastHandler {
             _rpc: PhantomData,
@@ -303,7 +303,7 @@ where
     fn create_message_handler(
         &self,
         header: &MessageHeader,
-    ) -> Box<Decode<Item = Action> + Send + 'static> {
+    ) -> Box<dyn Decode<Item = Action> + Send + 'static> {
         let decoder = self.decoder_maker.create();
         let handler = CallHandler {
             _rpc: PhantomData,

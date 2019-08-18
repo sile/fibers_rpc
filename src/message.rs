@@ -59,7 +59,7 @@ pub struct OutgoingMessage {
     pub payload: OutgoingMessagePayload,
 }
 
-pub struct OutgoingMessagePayload(Box<Encode<Item = Never> + Send + 'static>);
+pub struct OutgoingMessagePayload(Box<dyn Encode<Item = Never> + Send + 'static>);
 impl OutgoingMessagePayload {
     pub fn new<E>(encoder: E) -> Self
     where

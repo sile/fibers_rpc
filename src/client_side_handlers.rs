@@ -88,7 +88,7 @@ impl fmt::Debug for Assigner {
     }
 }
 
-pub type BoxResponseHandler = Box<HandleResponse<Item = ()> + Send + 'static>;
+pub type BoxResponseHandler = Box<dyn HandleResponse<Item = ()> + Send + 'static>;
 
 pub trait HandleResponse: Decode<Item = ()> {
     fn handle_error(&mut self, error: Error);
