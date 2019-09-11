@@ -264,7 +264,7 @@ where
                 track_assert!(
                     self.is_written,
                     ErrorKind::Timeout,
-                    "No data written in the duration {:?}",
+                    "TCP socket buffer (send) is full for {:?}",
                     self.options.tcp_write_timeout
                 );
                 continue;
