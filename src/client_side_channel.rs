@@ -70,7 +70,9 @@ impl ClientSideChannel {
     pub fn force_wakeup(&mut self) {
         if let MessageStreamState::Wait { .. } = self.message_stream {
             info!(self.logger, "Waked up");
-            self.exponential_backoff.next();
+            // We don't multiply `timeout` by 2 here because it would cause
+            // arithmetic overflow on Duration/Instant computation
+            // if this function is repeatedly called.
             let next = MessageStreamState::Connecting {
                 buffer: Vec::new(),
                 future: tcp_connect(self.server, &self.options),
