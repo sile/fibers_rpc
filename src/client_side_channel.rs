@@ -4,7 +4,6 @@ use crate::message::{MessageId, OutgoingMessage};
 use crate::message_stream::MessageStream;
 use crate::metrics::{ChannelMetrics, ClientMetrics};
 use crate::{Error, ErrorKind, Result};
-use fibers;
 use fibers::net::TcpStream;
 use fibers::time::timer::{self, Timeout, TimerExt};
 use futures::{Async, Future, Poll, Stream};

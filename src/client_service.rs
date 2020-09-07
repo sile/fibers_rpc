@@ -84,7 +84,7 @@ impl ClientServiceBuilder {
             spawner: spawner.boxed(),
             command_rx,
             command_tx,
-            channels: channels.clone(),
+            channels,
             keep_alive_timeout: self.keep_alive_timeout,
             channel_options: self.channel_options.clone(),
             metrics,

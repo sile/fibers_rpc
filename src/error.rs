@@ -1,5 +1,3 @@
-use bytecodec;
-use std;
 use trackable::error::{ErrorKind as TrackableErrorKind, ErrorKindExt, Failure, TrackableError};
 
 /// This crate specific `Error` type.
