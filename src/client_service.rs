@@ -161,7 +161,7 @@ impl ClientService {
                             let command = Command::RemoveChannel { server };
                             let _ = command_tx.send(command);
                             Ok(())
-                        }));;
+                        }));
                         channels.insert(server, handle);
                         channels
                     });
