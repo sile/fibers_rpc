@@ -154,7 +154,13 @@ where
         &mut self,
     ) -> Result<Option<MessageEvent<<A::Handler as Decode>::Item>>> {
         loop {
-            track!(self.rbuf.fill(&mut self.transport_stream))?;
+            match track!(self.rbuf.fill(&mut self.transport_stream)) {
+                Err(_e) => {
+                    //println!("{}", e);
+                    break;
+                }
+                Ok(_r) => {}
+            }
 
             if !self.packet_header_decoder.is_idle() {
                 track!(self
